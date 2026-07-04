@@ -20,6 +20,7 @@ process.env.TELEGRAM_WEBHOOK_SECRET = 'hook-secret-test';
 
 const pg = new EmbeddedPostgres({
   databaseDir: dataDir, user: 'hms_user', password: 'testpass', port: pgPort, persistent: false,
+  initdbFlags: ['--locale=C', '--encoding=UTF8'], // Windows 한국어 로케일(UHC) 회피
 });
 
 let app;
@@ -55,6 +56,8 @@ async function main() {
   await pool.query(sql2);
   const sql3 = fs.readFileSync(new URL('../migrations/003_push.sql', import.meta.url), 'utf8');
   await pool.query(sql3);
+  const sql4 = fs.readFileSync(new URL('../migrations/004_study_earn.sql', import.meta.url), 'utf8');
+  await pool.query(sql4);
   const { initPush } = await import('../src/push.js');
   await initPush();
 
@@ -156,6 +159,21 @@ async function main() {
   const r2 = await api('POST', '/api/earn-requests', { catalog_id: e1.id }, tokens.child, 200);
   await api('DELETE', `/api/earn-requests/${r2.id}`, null, tokens.child, 200);
   await api('DELETE', `/api/earn-requests/${r2.id}`, null, tokens.child, 404);
+
+  // --- external app claim (ext_ref): duplicate blocked, cancel frees the slot
+  const x1 = await api('POST', '/api/earn-requests',
+    { catalog_id: e1.id, comment: '학습앱 세트#7', source_kind: 'study', ext_ref: 'set-7',
+      meta: { total: 10, correct: 10, accuracy: 100 } }, tokens.child, 200);
+  const xd = await api('POST', '/api/earn-requests',
+    { catalog_id: e1.id, source_kind: 'study', ext_ref: 'set-7' }, tokens.child, 409);
+  assert.equal(xd.error, 'duplicate_claim');
+  const x8 = await api('POST', '/api/earn-requests',
+    { catalog_id: e1.id, source_kind: 'study', ext_ref: 'set-8' }, tokens.child, 200); // 다른 세트는 OK
+  await api('DELETE', `/api/earn-requests/${x8.id}`, null, tokens.child, 200);
+  await api('DELETE', `/api/earn-requests/${x1.id}`, null, tokens.child, 200);
+  const x2 = await api('POST', '/api/earn-requests',
+    { catalog_id: e1.id, source_kind: 'study', ext_ref: 'set-7' }, tokens.child, 200); // 취소 후 재청구 OK
+  await api('DELETE', `/api/earn-requests/${x2.id}`, null, tokens.child, 200);
 
   // --- v1.2.0: name + secret change
   await api('PATCH', '/api/me', { name: '아이2' }, tokens.child, 200);

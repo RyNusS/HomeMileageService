@@ -12,6 +12,7 @@ export async function earnRoutes(app, opts) {
   // child submits a claim (multipart with optional photo, or plain JSON)
   app.post('/earn-requests', { onRequest: app.authRequired }, async (req, reply) => {
     let catalogId; let comment = ''; let proofPath = null;
+    let sourceKind = null; let extRef = null; let meta = null;
 
     if (req.isMultipart()) {
       const parts = req.parts();
@@ -31,6 +32,10 @@ export async function earnRoutes(app, opts) {
       const b = req.body || {};
       catalogId = Number(b.catalog_id);
       comment = String(b.comment || '').slice(0, 500);
+      // 외부 앱 청구 메타(선택): 학습 앱 등이 중복 차단용 참조를 함께 보낸다
+      if (b.source_kind) sourceKind = String(b.source_kind).slice(0, 30);
+      if (b.ext_ref) extRef = String(b.ext_ref).slice(0, 100);
+      if (b.meta && typeof b.meta === 'object') meta = JSON.stringify(b.meta).slice(0, 2000);
     }
     if (!catalogId) return reply.code(400).send({ error: 'catalog_id_required' });
 
@@ -42,10 +47,19 @@ export async function earnRoutes(app, opts) {
     if (!item) return reply.code(404).send({ error: 'catalog_not_found' });
     if (item.proof_required && !proofPath) return reply.code(400).send({ error: 'proof_required' });
 
-    const ins = await q(
-      `INSERT INTO earn_request (family_id, user_id, catalog_id, points, comment, proof_path)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [req.user.family_id, req.user.sub, item.id, item.points, comment, proofPath]);
+    let ins;
+    try {
+      ins = await q(
+        `INSERT INTO earn_request (family_id, user_id, catalog_id, points, comment, proof_path,
+                                   source_kind, ext_ref, meta)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+        [req.user.family_id, req.user.sub, item.id, item.points, comment, proofPath,
+          sourceKind, extRef, meta]);
+    } catch (err) {
+      // 같은 ext_ref(학습 세트)로 이미 청구한 경우
+      if (err.code === '23505') return reply.code(409).send({ error: 'duplicate_claim' });
+      throw err;
+    }
 
     const reqId = Number(ins.rows[0].id);
     const who = await q('SELECT name FROM app_user WHERE id = $1', [req.user.sub]);
