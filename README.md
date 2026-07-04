@@ -2,7 +2,7 @@
 
 가정용 마일리지(포인트) 보상 관리 서비스. 부모가 자녀에게 활동에 대한 마일리지를 부여하고, 자녀는 이를 휴대폰·PC·게임기 사용시간권이나 용돈 등으로 사용한다. 자체 호스팅(홈 서버)으로 운영하며, 우리 가족으로 시작하되 다른 가족에게도 계정을 열어줄 수 있도록 설계한다.
 
-> **상태: 기획·설계 단계** (아직 소스코드 없음). 본 README와 이슈는 지금까지 진행한 설계 밑바탕을 기록·관리하기 위한 것이다.
+> **상태: Phase 1 (MVP) 구현·운영 중** — 마일리지 코어(적립 승인·재고형 사용권·가격표·PWA)가 동작한다.
 
 ## 개요
 
@@ -24,12 +24,29 @@
 
 ## 아키텍처 (계획)
 
-- **프론트엔드**: React + Vite + TypeScript (PWA)
-- **백엔드**: Node + Fastify (TypeScript)
+- **프론트엔드**: React + Vite (PWA) — `web/`
+- **백엔드**: Node + Fastify — `server/`
 - **DB**: PostgreSQL (마일리지는 원장/ledger 기반 — 잔액을 누적 거래로 산출)
-- **인증**: 자체 계정 (argon2 해시 + 토큰 세션), 부모/자녀 역할 분리
-- **배포**: Docker + Caddy(리버스 프록시, 자동 HTTPS). 웹 포트만 외부 공개, DB는 비공개.
-- **호스팅**: 자체 홈 서버(Rocky Linux 9.6, Docker, 기존 PostgreSQL 재활용)
+- **인증**: 자체 계정 (scrypt 해시 + JWT), 부모/자녀 역할 분리
+- **배포**: Docker + Caddy(리버스 프록시, 자동 HTTPS) — `deploy/`. 웹 포트만 외부 공개, DB는 비공개.
+- **호스팅**: 자체 홈 서버(Rocky Linux 9, Docker)
+
+## 구조·실행
+
+```
+server/   # Fastify API (src/, migrations/, scripts/, test/)
+web/      # React PWA (자녀·부모 화면)
+deploy/   # docker-compose.yml, Caddyfile, remote_deploy.sh
+```
+
+로컬 개발:
+
+```bash
+cd server && npm install && npm test        # 내장 Postgres로 E2E
+cd web && npm install && npm run dev        # /api 프록시 → localhost:3000
+```
+
+서버 배포: `web`을 `npm run build`로 빌드해 `hms/dist`로 포함한 번들을 만들고 `deploy/remote_deploy.sh`를 서버에서 실행한다. 시크릿(DB 비밀번호·JWT·봇 토큰)은 서버의 `hms.env`(chmod 600)에만 둔다 — `server/.env.example` 참조.
 
 ## 도메인 모델 (요약)
 
@@ -52,7 +69,7 @@
 
 ## 다음 단계
 
-- 마일리지 수치(적립 포인트/사용 가격표 초기값) 확정
-- Phase 0 인프라 셋업 착수
+- 부모 텔레그램 인라인 버튼 승인(webhook), 자녀 웹푸시 알림
+- 사용 UX 다듬기(만료 정책, 정산 취소 등) 및 Phase 2(학습 앱 연동) 착수
 
 자세한 진행 내역은 Issues 참조.

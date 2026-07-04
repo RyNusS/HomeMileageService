@@ -1,0 +1,52 @@
+# ── 환경/시크릿 ─────────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+credentials*
+secrets*
+
+# ── Node / Vite / 빌드 ──────────────────────
+node_modules/
+dist/
+build/
+.vite/
+*.local
+coverage/
+*.log
+npm-debug.log*
+
+# ── 런타임 데이터 ───────────────────────────
+# 증빙 사진 등 업로드 (서버 디스크/마운트 스토리지)
+uploads/
+data/
+*.sqlite
+*.sqlite3
+
+# ── 로컬 운영 문서 (GitHub 비공개) ──────────
+# 거버넌스·기획 문서는 로컬에서만 관리
+CLAUDE.md
+.workspace/
+docs/
+
+# ── AI / 작업 흔적 (no-ai-trace F절) ────────
+.claude/
+.cowork/
+.local/
+*.original.bak
+*.bak
+MEMORY.md
+memory/
+.scratch/
+
+# ── IDE / OS ────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── 로컬 스테이징/개인 설정 (GitHub 비공개) ──
+_staging/
+telegram_config.json
+telegram_notify.py

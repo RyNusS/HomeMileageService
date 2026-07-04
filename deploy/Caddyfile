@@ -1,0 +1,13 @@
+{$HMS_DOMAIN} {
+    encode zstd gzip
+
+    handle /api/* {
+        reverse_proxy hms-api:3000
+    }
+
+    handle {
+        root * /srv/hms-web
+        try_files {path} /index.html
+        file_server
+    }
+}
