@@ -3,6 +3,8 @@ import { api, getToken, setToken } from './api.js';
 import Login from './pages/Login.jsx';
 import ChildHome from './pages/ChildHome.jsx';
 import ParentHome from './pages/ParentHome.jsx';
+import AdminHome from './pages/AdminHome.jsx';
+import { ToastHost } from './toast.jsx';
 
 export default function App() {
   const [me, setMe] = useState(null);
@@ -24,8 +26,13 @@ export default function App() {
   const logout = () => { setToken(null); setMe(null); };
 
   if (loading) return <div className="notice">불러오는 중...</div>;
-  if (!me) return <Login onLogin={refreshMe} />;
-  return me.role === 'child'
-    ? <ChildHome me={me} refreshMe={refreshMe} logout={logout} />
-    : <ParentHome me={me} refreshMe={refreshMe} logout={logout} />;
+  let body;
+  if (!me) body = <Login onLogin={refreshMe} />;
+  else if (me.role === 'child') body = <ChildHome me={me} refreshMe={refreshMe} logout={logout} />;
+  else if (me.role === 'super_admin') body = <AdminHome me={me} refreshMe={refreshMe} logout={logout} />;
+  else body = <ParentHome me={me} refreshMe={refreshMe} logout={logout} />;
+  return (<>
+    <ToastHost />
+    {body}
+  </>);
 }

@@ -1,0 +1,8 @@
+[Unit]
+Description=HMS daily backup (DB + uploads)
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/hms-backup.sh

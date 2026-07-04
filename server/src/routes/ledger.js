@@ -2,6 +2,23 @@
 import { q } from '../db.js';
 
 export async function ledgerRoutes(app) {
+  // family-wide ledger (parent) - includes user names, optional source_type filter
+  app.get('/ledger/family', { onRequest: app.parentOnly }, async (req) => {
+    const params = [req.user.family_id];
+    let where = 'l.family_id = $1';
+    if (req.query.source_type) {
+      params.push(req.query.source_type);
+      where += ` AND l.source_type = $${params.length}`;
+    }
+    params.push(Math.min(Number(req.query.limit) || 50, 200));
+    const { rows } = await q(
+      `SELECT l.id, l.user_id, u.name AS user_name, l.amount, l.source_type, l.memo, l.created_at
+       FROM ledger_entry l JOIN app_user u ON u.id = l.user_id
+       WHERE ${where}
+       ORDER BY l.id DESC LIMIT $${params.length}`, params);
+    return rows.map((r) => ({ ...r, id: Number(r.id), user_id: Number(r.user_id) }));
+  });
+
   app.get('/ledger', { onRequest: app.authRequired }, async (req) => {
     const userId = req.user.role === 'child' ? req.user.sub : (req.query.user_id || req.user.sub);
     const { rows } = await q(

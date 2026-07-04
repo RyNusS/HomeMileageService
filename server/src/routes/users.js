@@ -7,7 +7,7 @@ export async function userRoutes(app) {
   app.get('/users', { onRequest: app.authRequired }, async (req) => {
     const { rows } = await q(
       `SELECT id, login_id, name, role, balance_cache, active
-       FROM app_user WHERE family_id = $1 ORDER BY role DESC, id`,
+       FROM app_user WHERE family_id = $1 AND active ORDER BY role DESC, id`,
       [req.user.family_id]);
     return rows.map((r) => ({
       id: Number(r.id), login_id: r.login_id, name: r.name, role: r.role,
@@ -45,6 +45,16 @@ export async function userRoutes(app) {
       `UPDATE app_user SET secret_hash = $1
        WHERE id = $2 AND family_id = $3 AND role = 'child'`,
       [hash, req.params.id, req.user.family_id]);
+    if (!rowCount) return reply.code(404).send({ error: 'not_found' });
+    return { ok: true };
+  });
+
+  // deactivate (soft-delete) a child account
+  app.delete('/users/:id', { onRequest: app.parentOnly }, async (req, reply) => {
+    const { rowCount } = await q(
+      `UPDATE app_user SET active = FALSE
+       WHERE id = $1 AND family_id = $2 AND role = 'child'`,
+      [req.params.id, req.user.family_id]);
     if (!rowCount) return reply.code(404).send({ error: 'not_found' });
     return { ok: true };
   });

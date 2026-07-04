@@ -1,10 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { api, t } from '../api.js';
+import { toast } from '../toast.jsx';
+import SettingsModal from '../settings.jsx';
 
 const fmtDT = (s) => new Date(s).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 export default function ChildHome({ me, refreshMe, logout }) {
   const [tab, setTab] = useState('home');
+  const [showSettings, setShowSettings] = useState(false);
   const [vouchers, setVouchers] = useState({ remaining_minutes: 0, vouchers: [] });
 
   const loadVouchers = useCallback(async () => {
@@ -21,15 +24,19 @@ export default function ChildHome({ me, refreshMe, logout }) {
           <h1>안녕, {me.name}! 👋</h1>
           <div className="who">{me.family_name}</div>
         </div>
-        <button onClick={logout}>로그아웃</button>
+        <div>
+          <button onClick={() => setShowSettings(true)}>⚙️ 설정</button>
+          <button onClick={logout}>로그아웃</button>
+        </div>
       </div>
       <div className="content">
-        {tab === 'home' && <HomeTab me={me} vouchers={vouchers} />}
+        {tab === 'home' && <HomeTab me={me} vouchers={vouchers} refreshAll={refreshAll} />}
         {tab === 'earn' && <EarnTab refreshAll={refreshAll} />}
         {tab === 'shop' && <ShopTab me={me} refreshAll={refreshAll} />}
         {tab === 'voucher' && <VoucherTab vouchers={vouchers} refreshAll={refreshAll} />}
         {tab === 'history' && <HistoryTab />}
       </div>
+      {showSettings && <SettingsModal me={me} refreshMe={refreshMe} onClose={() => setShowSettings(false)} />}
       <nav className="tabbar">
         {[['home', '🏠', '홈'], ['earn', '⭐', '적립'], ['shop', '🛍️', '상점'],
           ['voucher', '🎟️', '사용권'], ['history', '📋', '내역']].map(([k, ico, label]) => (
@@ -42,9 +49,20 @@ export default function ChildHome({ me, refreshMe, logout }) {
   );
 }
 
-function HomeTab({ me, vouchers }) {
+function HomeTab({ me, vouchers, refreshAll }) {
   const [reqs, setReqs] = useState([]);
-  useEffect(() => { api('GET', '/api/earn-requests').then(setReqs); }, []);
+  const load = useCallback(async () => setReqs(await api('GET', '/api/earn-requests')), []);
+  useEffect(() => { load(); }, [load]);
+
+  const cancel = async (r) => {
+    if (!window.confirm(`'${r.item_name}' 청구를 취소할까요?`)) return;
+    try {
+      await api('DELETE', `/api/earn-requests/${r.id}`);
+      toast('청구가 취소되었어요');
+      await load(); await refreshAll();
+    } catch (ex) { toast(t(ex.message), 'error'); }
+  };
+
   return (
     <>
       <div className="balance-card">
@@ -54,15 +72,20 @@ function HomeTab({ me, vouchers }) {
       </div>
       <div className="card">
         <h3>최근 적립 청구</h3>
-        {reqs.slice(0, 5).map((r) => (
+        {reqs.slice(0, 7).map((r) => (
           <div className="row" key={r.id}>
             <div className="main">
               <div className="name">{r.item_name}</div>
               <div className="meta">{fmtDT(r.created_at)} · +{r.points}P</div>
             </div>
-            <span className={`pill ${r.status}`}>
-              {{ pending: '대기중', approved: '승인됨', rejected: '거절됨' }[r.status]}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className={`pill ${r.status}`}>
+                {{ pending: '대기중', approved: '승인됨', rejected: '거절됨' }[r.status]}
+              </span>
+              {r.status === 'pending' && (
+                <button className="small danger" onClick={() => cancel(r)}>취소</button>
+              )}
+            </div>
           </div>
         ))}
         {reqs.length === 0 && <p className="notice">아직 청구 내역이 없어요</p>}
@@ -76,23 +99,24 @@ function EarnTab({ refreshAll }) {
   const [sel, setSel] = useState(null);
   const [comment, setComment] = useState('');
   const [photo, setPhoto] = useState(null);
-  const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { api('GET', '/api/catalog/earn').then(setItems); }, []);
 
+  const close = () => { setSel(null); setComment(''); setPhoto(null); };
+
   const submit = async () => {
-    setBusy(true); setMsg('');
+    setBusy(true);
     try {
       const fd = new FormData();
       fd.append('catalog_id', String(sel.id));
       fd.append('comment', comment);
       if (photo) fd.append('photo', photo);
       await api('POST', '/api/earn-requests', fd);
-      setSel(null); setComment(''); setPhoto(null);
-      setMsg('청구 완료! 부모님 승인을 기다려 주세요 😊');
+      toast(`'${sel.name}' 청구 완료! 승인을 기다려 주세요`);
+      close();
       await refreshAll();
-    } catch (ex) { setMsg(t(ex.message)); }
+    } catch (ex) { toast(t(ex.message), 'error'); }
     setBusy(false);
   };
 
@@ -106,24 +130,28 @@ function EarnTab({ refreshAll }) {
               <div className="name">{it.name}</div>
               <div className="meta">+{it.points}P{it.proof_required ? ' · 📷 사진 필요' : ''}</div>
             </div>
-            <button className="small" onClick={() => { setSel(it); setMsg(''); }}>청구</button>
+            <button className="small" onClick={() => setSel(it)}>청구</button>
           </div>
         ))}
         {items.length === 0 && <p className="notice">적립 항목이 아직 없어요</p>}
       </div>
-      {msg && <p className="notice">{msg}</p>}
       {sel && (
-        <div className="modal-bg" onClick={() => setSel(null)}>
+        <div className="modal-bg" onClick={close}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>{sel.name} (+{sel.points}P)</h3>
+            <div className="modal-head">
+              <h3>{sel.name} (+{sel.points}P)</h3>
+              <button className="modal-close" onClick={close}>✕</button>
+            </div>
             <label className="fld">한마디 (선택)</label>
             <input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="예: 수학 숙제 다 했어요" />
             <label className="fld">사진 {sel.proof_required ? '(필수)' : '(선택)'}</label>
             <input type="file" accept="image/*" onChange={(e) => setPhoto(e.target.files[0] || null)} />
-            <div style={{ height: 16 }} />
-            <button className="primary" disabled={busy || (sel.proof_required && !photo)} onClick={submit}>
-              적립 청구하기
-            </button>
+            <div className="btn-row">
+              <button className="primary" disabled={busy || (sel.proof_required && !photo)} onClick={submit}>
+                적립 청구하기
+              </button>
+              <button className="cancel" onClick={close}>취소</button>
+            </div>
           </div>
         </div>
       )}
@@ -135,21 +163,32 @@ function ShopTab({ me, refreshAll }) {
   const [items, setItems] = useState([]);
   const [sel, setSel] = useState(null);
   const [qty, setQty] = useState(1);
-  const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { api('GET', '/api/catalog/spend').then(setItems); }, []);
 
+  const open = (it) => {
+    if (me.balance < it.price_points) {
+      toast(`마일리지가 부족해요 (필요 ${it.price_points}P · 보유 ${me.balance}P)`, 'error');
+      return;
+    }
+    setSel(it); setQty(1);
+  };
+
   const buy = async () => {
-    setBusy(true); setMsg('');
+    if (me.balance < sel.price_points * qty) {
+      toast(`마일리지가 부족해요 (필요 ${sel.price_points * qty}P · 보유 ${me.balance}P)`, 'error');
+      return;
+    }
+    setBusy(true);
     try {
       const r = await api('POST', '/api/orders', { catalog_id: sel.id, qty });
+      toast(r.status === 'payout_pending'
+        ? '용돈 교환 신청 완료! 부모님이 현금으로 주실 거예요'
+        : `구매 완료! ${sel.name} ${qty}개가 사용권에 추가됐어요`);
       setSel(null); setQty(1);
-      setMsg(r.status === 'payout_pending'
-        ? '용돈 교환 신청 완료! 부모님이 현금으로 주실 거예요 💰'
-        : '구매 완료! 사용권 탭에서 확인해요 🎟️');
       await refreshAll();
-    } catch (ex) { setMsg(t(ex.message)); }
+    } catch (ex) { toast(t(ex.message), 'error'); }
     setBusy(false);
   };
 
@@ -166,17 +205,18 @@ function ShopTab({ me, refreshAll }) {
               <div className="name">{it.kind === 'cash' ? '💰 ' : '🎟️ '}{it.name}</div>
               <div className="meta">{it.price_points}P{it.unit_minutes ? ` · ${it.unit_minutes}분` : ''}</div>
             </div>
-            <button className="small" disabled={me.balance < it.price_points}
-              onClick={() => { setSel(it); setQty(1); setMsg(''); }}>구매</button>
+            <button className="small" onClick={() => open(it)}>구매</button>
           </div>
         ))}
         {items.length === 0 && <p className="notice">상점 항목이 아직 없어요</p>}
       </div>
-      {msg && <p className="notice">{msg}</p>}
       {sel && (
         <div className="modal-bg" onClick={() => setSel(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>{sel.name}</h3>
+            <div className="modal-head">
+              <h3>{sel.name}</h3>
+              <button className="modal-close" onClick={() => setSel(null)}>✕</button>
+            </div>
             {sel.kind === 'time_voucher' && (
               <div className="stepper" style={{ margin: '10px 0' }}>
                 <button onClick={() => setQty(Math.max(1, qty - 1))}>−</button>
@@ -185,9 +225,12 @@ function ShopTab({ me, refreshAll }) {
               </div>
             )}
             <p className="notice">총 {sel.price_points * qty}P 차감 · 내 잔액 {me.balance}P</p>
-            <button className="primary" disabled={busy || me.balance < sel.price_points * qty} onClick={buy}>
-              {sel.price_points * qty}P로 구매하기
-            </button>
+            <div className="btn-row">
+              <button className="primary" disabled={busy || me.balance < sel.price_points * qty} onClick={buy}>
+                {sel.price_points * qty}P로 구매하기
+              </button>
+              <button className="cancel" onClick={() => setSel(null)}>취소</button>
+            </div>
           </div>
         </div>
       )}
@@ -196,19 +239,18 @@ function ShopTab({ me, refreshAll }) {
 }
 
 function VoucherTab({ vouchers, refreshAll }) {
-  const [minutes, setMinutes] = useState(30);
-  const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const active = vouchers.vouchers.filter((v) => v.status === 'active');
   const past = vouchers.vouchers.filter((v) => v.status !== 'active');
 
-  const consume = async () => {
-    setBusy(true); setMsg('');
+  const useOne = async (v) => {
+    if (!window.confirm(`'${v.label}' (${v.remaining_minutes}분)을 지금 사용할까요?`)) return;
+    setBusy(true);
     try {
-      const r = await api('POST', '/api/vouchers/consume', { minutes: Number(minutes) });
-      setMsg(`${r.used}분 사용 완료! 남은 사용권 ${r.remaining}분`);
+      const r = await api('POST', `/api/vouchers/${v.id}/use`);
+      toast(`${v.label} ${r.used}분 사용 완료!`);
       await refreshAll();
-    } catch (ex) { setMsg(t(ex.message)); }
+    } catch (ex) { toast(t(ex.message), 'error'); }
     setBusy(false);
   };
 
@@ -220,40 +262,34 @@ function VoucherTab({ vouchers, refreshAll }) {
         <div className="sub">사용권 {active.length}장 보유 중</div>
       </div>
       <div className="card">
-        <h3>사용하기</h3>
-        <div className="stepper">
-          <button onClick={() => setMinutes(Math.max(10, minutes - 10))}>−</button>
-          <span>{minutes}분</span>
-          <button onClick={() => setMinutes(minutes + 10)}>+</button>
-          <button className="small" style={{ marginLeft: 'auto' }}
-            disabled={busy || vouchers.remaining_minutes < minutes} onClick={consume}>
-            사용
-          </button>
-        </div>
-        {msg && <p className="notice">{msg}</p>}
-      </div>
-      <div className="card">
         <h3>내 사용권</h3>
         {active.map((v) => (
           <div className="row" key={v.id}>
             <div className="main">
               <div className="name">{v.label}</div>
-              <div className="meta">잔여 {v.remaining_minutes}/{v.total_minutes}분</div>
+              <div className="meta">{v.remaining_minutes}분 · {fmtDT(v.created_at)} 구매</div>
             </div>
-            <span className="pill active">보유</span>
+            <button className="small voucher-use-btn" disabled={busy} onClick={() => useOne(v)}>
+              사용하기
+            </button>
           </div>
         ))}
-        {past.slice(0, 10).map((v) => (
-          <div className="row" key={v.id}>
-            <div className="main">
-              <div className="name">{v.label}</div>
-              <div className="meta">{fmtDT(v.created_at)}</div>
-            </div>
-            <span className="pill consumed">사용완료</span>
-          </div>
-        ))}
-        {vouchers.vouchers.length === 0 && <p className="notice">사용권이 없어요. 상점에서 구매해요!</p>}
+        {active.length === 0 && <p className="notice">보유 중인 사용권이 없어요. 상점에서 구매해요!</p>}
       </div>
+      {past.length > 0 && (
+        <div className="card">
+          <h3>사용 완료</h3>
+          {past.slice(0, 10).map((v) => (
+            <div className="row" key={v.id}>
+              <div className="main">
+                <div className="name">{v.label}</div>
+                <div className="meta">{fmtDT(v.created_at)}</div>
+              </div>
+              <span className="pill consumed">사용완료</span>
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }

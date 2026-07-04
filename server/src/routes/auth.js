@@ -44,12 +44,20 @@ export async function authRoutes(app) {
   app.get('/me', { onRequest: app.authRequired }, async (req) => {
     const { rows } = await q(
       `SELECT u.id, u.login_id, u.name, u.role, u.balance_cache, f.name AS family_name
-       FROM app_user u JOIN family f ON f.id = u.family_id
+       FROM app_user u LEFT JOIN family f ON f.id = u.family_id
        WHERE u.id = $1`, [req.user.sub]);
     const u = rows[0];
     return {
       id: Number(u.id), login_id: u.login_id, name: u.name, role: u.role,
       balance: u.balance_cache, family_name: u.family_name,
     };
+  });
+
+  // change own display name
+  app.patch('/me', { onRequest: app.authRequired }, async (req, reply) => {
+    const name = (req.body && req.body.name || '').trim();
+    if (!name || name.length > 30) return reply.code(400).send({ error: 'bad_name' });
+    await q('UPDATE app_user SET name = $1 WHERE id = $2', [name, req.user.sub]);
+    return { ok: true };
   });
 }

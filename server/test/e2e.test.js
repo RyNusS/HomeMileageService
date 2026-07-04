@@ -50,6 +50,8 @@ async function main() {
   const fs = await import('node:fs');
   const sql = fs.readFileSync(new URL('../migrations/001_phase1.sql', import.meta.url), 'utf8');
   await pool.query(sql);
+  const sql2 = fs.readFileSync(new URL('../migrations/002_admin.sql', import.meta.url), 'utf8');
+  await pool.query(sql2);
 
   const { hashSecret } = await import('../src/hash.js');
   await pool.query('SET search_path TO hms');
@@ -144,6 +146,68 @@ async function main() {
   const nc = await api('POST', '/api/users', { login_id: 'c2', name: '둘째', pin: '5678' }, tokens.parent, 200);
   await api('POST', `/api/users/${nc.id}/reset-pin`, { pin: '4321' }, tokens.parent, 200);
   await api('POST', '/api/auth/login', { login_id: 'c2', secret: '4321' }, null, 200);
+
+  // --- v1.2.0: cancel own pending claim
+  const r2 = await api('POST', '/api/earn-requests', { catalog_id: e1.id }, tokens.child, 200);
+  await api('DELETE', `/api/earn-requests/${r2.id}`, null, tokens.child, 200);
+  await api('DELETE', `/api/earn-requests/${r2.id}`, null, tokens.child, 404);
+
+  // --- v1.2.0: name + secret change
+  await api('PATCH', '/api/me', { name: '아이2' }, tokens.child, 200);
+  me = await api('GET', '/api/me', null, tokens.child, 200);
+  assert.equal(me.name, '아이2');
+  await api('POST', '/api/auth/change-secret', { old_secret: '1234', new_secret: '9876' }, tokens.child, 200);
+  await api('POST', '/api/auth/login', { login_id: 'c1', secret: '9876' }, null, 200);
+
+  // --- v1.2.0: single-voucher use (buy one, use it whole)
+  await api('POST', `/api/users/${childId}/adjust`, { amount: 80, memo: '충전' }, tokens.parent, 200);
+  await api('POST', '/api/orders', { catalog_id: s1.id, qty: 1 }, tokens.child, 200);
+  v = await api('GET', '/api/vouchers', null, tokens.child, 200);
+  const target = v.vouchers.find((x) => x.status === 'active' && x.remaining_minutes === 30);
+  const one = await api('POST', `/api/vouchers/${target.id}/use`, null, tokens.child, 200);
+  assert.equal(one.used, 30);
+  await api('POST', `/api/vouchers/${target.id}/use`, null, tokens.child, 404);
+
+  // --- v1.2.0: family ledger for parent (adjust entries visible)
+  const fled = await api('GET', '/api/ledger/family?source_type=adjust', null, tokens.parent, 200);
+  assert.ok(fled.length >= 2);
+  assert.ok(fled[0].user_name);
+  await api('GET', '/api/ledger/family', null, tokens.child, 403);
+
+  // --- v1.2.0: soft delete child
+  await api('DELETE', `/api/users/${nc.id}`, null, tokens.parent, 200);
+  const after = await api('GET', '/api/users', null, tokens.parent, 200);
+  assert.ok(!after.find((u) => u.id === nc.id));
+  await api('POST', '/api/auth/login', { login_id: 'c2', secret: '4321' }, null, 401);
+
+  // --- v1.2.0: super_admin + family isolation
+  await pool.query(
+    `INSERT INTO app_user (family_id, login_id, name, role, secret_hash) VALUES (NULL,'adm','관리자','super_admin',$1)`,
+    [await hashSecret('admin-pw-1')]);
+  const al = await api('POST', '/api/auth/login', { login_id: 'adm', secret: 'admin-pw-1' }, null, 200);
+  tokens.admin = al.token;
+  const fams = await api('GET', '/api/admin/families', null, tokens.admin, 200);
+  assert.equal(fams.length, 1);
+  await api('GET', '/api/admin/families', null, tokens.parent, 403);
+  // admin cannot use parent routes
+  await api('GET', '/api/earn-requests', null, tokens.admin, 200); // list ok (empty family scope)
+  await api('POST', '/api/catalog/earn', { name: 'x', points: 5 }, tokens.admin, 403);
+  // create family B with parent
+  const fb = await api('POST', '/api/admin/families', { name: 'B가족' }, tokens.admin, 200);
+  await api('POST', `/api/admin/families/${fb.id}/users`,
+    { login_id: 'pb', name: 'B부모', role: 'parent', secret: 'bparent1' }, tokens.admin, 200);
+  const bl = await api('POST', '/api/auth/login', { login_id: 'pb', secret: 'bparent1' }, null, 200);
+  // isolation: B parent sees nothing from A
+  const bu = await api('GET', '/api/users', null, bl.token, 200);
+  assert.equal(bu.length, 1);
+  const be = await api('GET', '/api/catalog/earn', null, bl.token, 200);
+  assert.equal(be.length, 0);
+  const br = await api('GET', '/api/earn-requests', null, bl.token, 200);
+  assert.equal(br.length, 0);
+  // rename + delete family B
+  await api('PATCH', `/api/admin/families/${fb.id}`, { name: 'B가족2' }, tokens.admin, 200);
+  await api('DELETE', `/api/admin/families/${fb.id}`, null, tokens.admin, 200);
+  await api('POST', '/api/auth/login', { login_id: 'pb', secret: 'bparent1' }, null, 401);
 
   console.log('ALL E2E TESTS PASSED');
 }

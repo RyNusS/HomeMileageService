@@ -74,6 +74,16 @@ export async function earnRoutes(app, opts) {
     return rows.map((r) => ({ ...r, id: Number(r.id), user_id: Number(r.user_id) }));
   });
 
+  // child cancels own pending claim
+  app.delete('/earn-requests/:id', { onRequest: app.authRequired }, async (req, reply) => {
+    const { rowCount } = await q(
+      `DELETE FROM earn_request
+       WHERE id = $1 AND user_id = $2 AND family_id = $3 AND status = 'pending'`,
+      [req.params.id, req.user.sub, req.user.family_id]);
+    if (!rowCount) return reply.code(404).send({ error: 'not_found_or_decided' });
+    return { ok: true };
+  });
+
   async function decide(req, reply, approve) {
     const result = await tx(async (c) => {
       const { rows } = await c.query(

@@ -11,6 +11,7 @@ import { catalogRoutes } from './routes/catalog.js';
 import { earnRoutes } from './routes/earn.js';
 import { spendRoutes } from './routes/spend.js';
 import { ledgerRoutes } from './routes/ledger.js';
+import { adminRoutes } from './routes/admin.js';
 
 const HOST = process.env.HOST || '0.0.0.0';
 const PORT = Number(process.env.PORT || 3000);
@@ -41,15 +42,25 @@ export function buildApp() {
     } catch {
       return reply.code(401).send({ error: 'unauthorized' });
     }
-    if (req.user.role !== 'parent' && req.user.role !== 'super_admin') {
+    if (req.user.role !== 'parent') {
       return reply.code(403).send({ error: 'parent_only' });
+    }
+  });
+  app.decorate('adminOnly', async (req, reply) => {
+    try {
+      await req.jwtVerify();
+    } catch {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+    if (req.user.role !== 'super_admin') {
+      return reply.code(403).send({ error: 'admin_only' });
     }
   });
 
   app.get('/api/health', async () => ({
     status: 'ok',
     service: 'hms-api',
-    version: process.env.APP_VERSION || '1.1.0',
+    version: process.env.APP_VERSION || '1.2.0',
     time: new Date().toISOString(),
   }));
 
@@ -72,6 +83,7 @@ export function buildApp() {
   app.register(earnRoutes, { prefix: '/api', uploadDir: UPLOAD_DIR });
   app.register(spendRoutes, { prefix: '/api' });
   app.register(ledgerRoutes, { prefix: '/api' });
+  app.register(adminRoutes, { prefix: '/api' });
 
   return app;
 }

@@ -1,10 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { api, t } from '../api.js';
+import { toast } from '../toast.jsx';
+import SettingsModal from '../settings.jsx';
 
 const fmtDT = (s) => new Date(s).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
-export default function ParentHome({ me, logout }) {
+export default function ParentHome({ me, refreshMe, logout }) {
   const [tab, setTab] = useState('approve');
+  const [showSettings, setShowSettings] = useState(false);
   return (
     <>
       <div className="topbar">
@@ -12,7 +15,10 @@ export default function ParentHome({ me, logout }) {
           <h1>{me.family_name} 관리</h1>
           <div className="who">{me.name} (부모)</div>
         </div>
-        <button onClick={logout}>로그아웃</button>
+        <div>
+          <button onClick={() => setShowSettings(true)}>⚙️ 설정</button>
+          <button onClick={logout}>로그아웃</button>
+        </div>
       </div>
       <div className="content">
         {tab === 'approve' && <ApproveTab />}
@@ -20,6 +26,7 @@ export default function ParentHome({ me, logout }) {
         {tab === 'catalog' && <CatalogTab />}
         {tab === 'payout' && <PayoutTab />}
       </div>
+      {showSettings && <SettingsModal me={me} refreshMe={refreshMe} onClose={() => setShowSettings(false)} />}
       <nav className="tabbar">
         {[['approve', '✅', '승인'], ['family', '👨‍👩‍👧', '가족'],
           ['catalog', '🏷️', '항목관리'], ['payout', '💰', '정산']].map(([k, ico, label]) => (
@@ -35,19 +42,38 @@ export default function ParentHome({ me, logout }) {
 function ApproveTab() {
   const [pending, setPending] = useState([]);
   const [recent, setRecent] = useState([]);
-  const [msg, setMsg] = useState('');
 
   const load = useCallback(async () => {
     setPending(await api('GET', '/api/earn-requests?status=pending'));
-    const all = await api('GET', '/api/earn-requests');
-    setRecent(all.filter((r) => r.status !== 'pending').slice(0, 10));
+    const decided = (await api('GET', '/api/earn-requests'))
+      .filter((r) => r.status !== 'pending')
+      .map((r) => ({
+        key: `e${r.id}`, when: r.decided_at || r.created_at,
+        title: `${r.user_name} · ${r.item_name}`, amount: r.points,
+        pillClass: r.status, pillText: r.status === 'approved' ? '승인' : '거절',
+      }));
+    const adjusts = (await api('GET', '/api/ledger/family?source_type=adjust'))
+      .map((l) => ({
+        key: `a${l.id}`, when: l.created_at,
+        title: `${l.user_name} · ${l.memo || (l.amount > 0 ? '지급' : '차감')}`,
+        amount: l.amount,
+        pillClass: l.amount > 0 ? 'approved' : 'rejected',
+        pillText: l.amount > 0 ? `지급 +${l.amount}P` : `차감 ${l.amount}P`,
+      }));
+    setRecent([...decided, ...adjusts]
+      .sort((a, b) => new Date(b.when) - new Date(a.when))
+      .slice(0, 15));
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const decide = async (id, action) => {
-    setMsg('');
-    try { await api('POST', `/api/earn-requests/${id}/${action}`); await load(); }
-    catch (ex) { setMsg(t(ex.message)); }
+  const decide = async (r, action) => {
+    try {
+      await api('POST', `/api/earn-requests/${r.id}/${action}`);
+      toast(action === 'approve'
+        ? `${r.user_name} · ${r.item_name} +${r.points}P 승인 완료`
+        : `${r.user_name} · ${r.item_name} 거절 처리했어요`);
+      await load();
+    } catch (ex) { toast(t(ex.message), 'error'); }
   };
 
   return (
@@ -64,23 +90,22 @@ function ApproveTab() {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
-              <button className="small" onClick={() => decide(r.id, 'approve')}>승인</button>
-              <button className="small danger" onClick={() => decide(r.id, 'reject')}>거절</button>
+              <button className="small" onClick={() => decide(r, 'approve')}>승인</button>
+              <button className="small danger" onClick={() => decide(r, 'reject')}>거절</button>
             </div>
           </div>
         ))}
         {pending.length === 0 && <p className="notice">대기 중인 청구가 없어요</p>}
       </div>
-      {msg && <p className="error">{msg}</p>}
-      <div className="section-title">최근 처리</div>
+      <div className="section-title">최근 처리 (승인/거절·지급/차감)</div>
       <div className="card">
         {recent.map((r) => (
-          <div className="row" key={r.id}>
+          <div className="row" key={r.key}>
             <div className="main">
-              <div className="name">{r.user_name} · {r.item_name}</div>
-              <div className="meta">{fmtDT(r.created_at)} · +{r.points}P</div>
+              <div className="name">{r.title}</div>
+              <div className="meta">{fmtDT(r.when)}</div>
             </div>
-            <span className={`pill ${r.status}`}>{r.status === 'approved' ? '승인' : '거절'}</span>
+            <span className={`pill ${r.pillClass}`}>{r.pillText}</span>
           </div>
         ))}
         {recent.length === 0 && <p className="notice">처리 내역이 없어요</p>}
@@ -93,23 +118,41 @@ function FamilyTab() {
   const [users, setUsers] = useState([]);
   const [mode, setMode] = useState(null); // {type:'new'} | {type:'pin'|'adjust', user}
   const [f, setF] = useState({});
-  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => setUsers(await api('GET', '/api/users')), []);
   useEffect(() => { load(); }, [load]);
 
+  const close = () => { setMode(null); setF({}); };
+
+  const removeChild = async (u) => {
+    if (!window.confirm(`'${u.name}' 계정을 삭제할까요?\n삭제하면 로그인할 수 없어요. (기록은 보존됩니다)`)) return;
+    try {
+      await api('DELETE', `/api/users/${u.id}`);
+      toast(`${u.name} 계정을 삭제했어요`);
+      await load();
+    } catch (ex) { toast(t(ex.message), 'error'); }
+  };
+
   const run = async () => {
-    setMsg('');
+    setBusy(true);
     try {
       if (mode.type === 'new') {
         await api('POST', '/api/users', { login_id: f.login_id, name: f.name, pin: f.pin });
+        toast(`${f.name} 계정을 만들었어요`);
       } else if (mode.type === 'pin') {
         await api('POST', `/api/users/${mode.user.id}/reset-pin`, { pin: f.pin });
+        toast(`${mode.user.name}의 PIN을 재설정했어요`);
       } else if (mode.type === 'adjust') {
-        await api('POST', `/api/users/${mode.user.id}/adjust`, { amount: Number(f.amount), memo: f.memo || '' });
+        const amt = Number(f.amount);
+        await api('POST', `/api/users/${mode.user.id}/adjust`, { amount: amt, memo: f.memo || '' });
+        toast(amt > 0
+          ? `${mode.user.name}에게 ${amt}P 지급 완료`
+          : `${mode.user.name}에게 ${Math.abs(amt)}P 차감 완료`);
       }
-      setMode(null); setF({}); await load();
-    } catch (ex) { setMsg(t(ex.message)); }
+      close(); await load();
+    } catch (ex) { toast(t(ex.message), 'error'); }
+    setBusy(false);
   };
 
   return (
@@ -126,18 +169,23 @@ function FamilyTab() {
               <div style={{ display: 'flex', gap: 6 }}>
                 <button className="small ghost" onClick={() => { setMode({ type: 'pin', user: u }); setF({}); }}>PIN</button>
                 <button className="small ghost" onClick={() => { setMode({ type: 'adjust', user: u }); setF({}); }}>지급/차감</button>
+                <button className="small danger" onClick={() => removeChild(u)}>삭제</button>
               </div>
             )}
           </div>
         ))}
       </div>
       <button className="primary" onClick={() => { setMode({ type: 'new' }); setF({}); }}>+ 자녀 계정 만들기</button>
-      {msg && <p className="error">{msg}</p>}
       {mode && (
-        <div className="modal-bg" onClick={() => setMode(null)}>
+        <div className="modal-bg" onClick={close}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>{mode.type === 'new' ? '자녀 계정 만들기'
+                : mode.type === 'pin' ? `${mode.user.name} PIN 재설정`
+                : `${mode.user.name} 마일리지 지급/차감`}</h3>
+              <button className="modal-close" onClick={close}>✕</button>
+            </div>
             {mode.type === 'new' && (<>
-              <h3>자녀 계정 만들기</h3>
               <label className="fld">이름</label>
               <input value={f.name || ''} onChange={(e) => setF({ ...f, name: e.target.value })} />
               <label className="fld">아이디 (영문/숫자)</label>
@@ -146,19 +194,19 @@ function FamilyTab() {
               <input inputMode="numeric" value={f.pin || ''} onChange={(e) => setF({ ...f, pin: e.target.value })} />
             </>)}
             {mode.type === 'pin' && (<>
-              <h3>{mode.user.name} PIN 재설정</h3>
               <label className="fld">새 PIN (숫자 4~6자리)</label>
               <input inputMode="numeric" value={f.pin || ''} onChange={(e) => setF({ ...f, pin: e.target.value })} />
             </>)}
             {mode.type === 'adjust' && (<>
-              <h3>{mode.user.name} 마일리지 지급/차감</h3>
               <label className="fld">포인트 (양수=지급, 음수=차감)</label>
               <input inputMode="numeric" value={f.amount || ''} onChange={(e) => setF({ ...f, amount: e.target.value })} placeholder="예: 100 또는 -50" />
               <label className="fld">메모</label>
               <input value={f.memo || ''} onChange={(e) => setF({ ...f, memo: e.target.value })} placeholder="예: 생일 보너스" />
             </>)}
-            <div style={{ height: 16 }} />
-            <button className="primary" onClick={run}>확인</button>
+            <div className="btn-row">
+              <button className="primary" disabled={busy} onClick={run}>확인</button>
+              <button className="cancel" onClick={close}>취소</button>
+            </div>
           </div>
         </div>
       )}
@@ -169,9 +217,9 @@ function FamilyTab() {
 function CatalogTab() {
   const [earn, setEarn] = useState([]);
   const [spend, setSpend] = useState([]);
-  const [mode, setMode] = useState(null); // {cat:'earn'|'spend', item?}
+  const [mode, setMode] = useState(null);
   const [f, setF] = useState({});
-  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     setEarn(await api('GET', '/api/catalog/earn'));
@@ -179,8 +227,10 @@ function CatalogTab() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  const close = () => { setMode(null); setF({}); };
+
   const save = async () => {
-    setMsg('');
+    setBusy(true);
     try {
       if (mode.cat === 'earn') {
         const body = { name: f.name, points: Number(f.points), proof_required: Boolean(f.proof_required) };
@@ -194,13 +244,18 @@ function CatalogTab() {
         if (mode.item) await api('PATCH', `/api/catalog/spend/${mode.item.id}`, body);
         else await api('POST', '/api/catalog/spend', body);
       }
-      setMode(null); setF({}); await load();
-    } catch (ex) { setMsg(t(ex.message)); }
+      toast(mode.item ? '항목을 수정했어요' : '항목을 추가했어요');
+      close(); await load();
+    } catch (ex) { toast(t(ex.message), 'error'); }
+    setBusy(false);
   };
 
   const toggle = async (cat, item) => {
-    await api('PATCH', `/api/catalog/${cat}/${item.id}`, { active: !item.active });
-    await load();
+    try {
+      await api('PATCH', `/api/catalog/${cat}/${item.id}`, { active: !item.active });
+      toast(item.active ? `'${item.name}' 항목을 숨겼어요` : `'${item.name}' 항목을 표시했어요`);
+      await load();
+    } catch (ex) { toast(t(ex.message), 'error'); }
   };
 
   return (
@@ -243,11 +298,13 @@ function CatalogTab() {
           <button className="small" onClick={() => { setMode({ cat: 'spend' }); setF({ kind: 'time_voucher' }); }}>+ 상점 항목 추가</button>
         </div>
       </div>
-      {msg && <p className="error">{msg}</p>}
       {mode && (
-        <div className="modal-bg" onClick={() => setMode(null)}>
+        <div className="modal-bg" onClick={close}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>{mode.item ? '항목 수정' : '항목 추가'}</h3>
+            <div className="modal-head">
+              <h3>{mode.item ? '항목 수정' : '항목 추가'}</h3>
+              <button className="modal-close" onClick={close}>✕</button>
+            </div>
             <label className="fld">이름</label>
             <input value={f.name || ''} onChange={(e) => setF({ ...f, name: e.target.value })} />
             {mode.cat === 'earn' ? (<>
@@ -270,8 +327,10 @@ function CatalogTab() {
               <label className="fld">가격 (포인트)</label>
               <input inputMode="numeric" value={f.price_points || ''} onChange={(e) => setF({ ...f, price_points: e.target.value })} />
             </>)}
-            <div style={{ height: 16 }} />
-            <button className="primary" onClick={save}>저장</button>
+            <div className="btn-row">
+              <button className="primary" disabled={busy} onClick={save}>저장</button>
+              <button className="cancel" onClick={close}>취소</button>
+            </div>
           </div>
         </div>
       )}
@@ -288,7 +347,13 @@ function PayoutTab() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const settle = async (id) => { await api('POST', `/api/orders/${id}/settle`); await load(); };
+  const settle = async (o) => {
+    try {
+      await api('POST', `/api/orders/${o.id}/settle`);
+      toast(`${o.user_name} · ${o.item_name} 정산 완료`);
+      await load();
+    } catch (ex) { toast(t(ex.message), 'error'); }
+  };
 
   return (
     <>
@@ -300,7 +365,7 @@ function PayoutTab() {
               <div className="name">{o.user_name} · {o.item_name}</div>
               <div className="meta">{fmtDT(o.created_at)} · -{o.total_points}P</div>
             </div>
-            <button className="small" onClick={() => settle(o.id)}>지급완료</button>
+            <button className="small" onClick={() => settle(o)}>지급완료</button>
           </div>
         ))}
         {pending.length === 0 && <p className="notice">지급 대기 건이 없어요</p>}

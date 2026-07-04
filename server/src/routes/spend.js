@@ -107,6 +107,27 @@ export async function spendRoutes(app) {
     };
   });
 
+  // use one voucher entirely (consume its remaining minutes)
+  app.post('/vouchers/:id/use', { onRequest: app.authRequired }, async (req, reply) => {
+    const result = await tx(async (c) => {
+      const { rows } = await c.query(
+        `SELECT id, remaining_minutes FROM voucher
+         WHERE id = $1 AND user_id = $2 AND family_id = $3 AND status = 'active'
+         FOR UPDATE`,
+        [req.params.id, req.user.sub, req.user.family_id]);
+      const v = rows[0];
+      if (!v) return { code: 404, error: 'not_found' };
+      await c.query(
+        `UPDATE voucher SET remaining_minutes = 0, status = 'consumed' WHERE id = $1`, [v.id]);
+      await c.query(
+        `INSERT INTO voucher_usage (voucher_id, used_minutes) VALUES ($1, $2)`,
+        [v.id, v.remaining_minutes]);
+      return { used: v.remaining_minutes };
+    });
+    if (result.error) return reply.code(result.code).send(result);
+    return result;
+  });
+
   // consume minutes FIFO across active vouchers (partial use / batch use)
   app.post('/vouchers/consume', { onRequest: app.authRequired }, async (req, reply) => {
     const minutes = Number(req.body && req.body.minutes);
