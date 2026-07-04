@@ -22,7 +22,7 @@ export default function ChildHome({ me, refreshMe, logout }) {
     } catch (ex) {
       if (ex.message === 'push_permission_denied') toast('알림 권한이 거부되었어요. 브라우저 설정에서 허용해 주세요', 'error');
       else if (ex.message === 'push_unsupported') toast('이 브라우저는 푸시를 지원하지 않아요. 홈 화면에 앱을 추가한 뒤 시도해 보세요', 'error');
-      else toast('알림 설정에 실패했어요', 'error');
+      else toast(`알림 설정에 실패했어요 (${ex.message})`, 'error');
     }
   };
 

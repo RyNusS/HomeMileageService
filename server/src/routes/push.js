@@ -1,9 +1,10 @@
 // web push subscription endpoints
 import { q } from '../db.js';
-import { getVapidPublicKey } from '../push.js';
+import { ensurePush, getVapidPublicKey } from '../push.js';
 
 export async function pushRoutes(app) {
   app.get('/push/vapid-public-key', { onRequest: app.authRequired }, async (req, reply) => {
+    await ensurePush(req.log);
     const key = await getVapidPublicKey();
     if (!key) return reply.code(503).send({ error: 'push_not_ready' });
     return { key };

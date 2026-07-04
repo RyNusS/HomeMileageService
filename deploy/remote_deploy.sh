@@ -34,6 +34,9 @@ sleep 4
 docker compose --env-file hms.env exec -T hms-api node scripts/migrate.js
 docker compose --env-file hms.env exec -T hms-api node scripts/seed.js
 docker compose --env-file hms.env exec -T hms-api node scripts/seed-admin.js
+# restart so services initialised at boot (web push VAPID 등) see the migrated schema
+docker compose --env-file hms.env restart hms-api 2>&1 | tail -1
+sleep 3
 docker compose --env-file hms.env exec -T hms-api node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>r.json()).then(j=>console.log('HEALTH', JSON.stringify(j)))"
 echo "TELEGRAM_IN_CONTAINER=$(docker exec hms-api sh -c 'test -n "$TELEGRAM_BOT_TOKEN" && echo yes || echo no')"
 

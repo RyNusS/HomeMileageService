@@ -3,6 +3,22 @@ import webpush from 'web-push';
 import { q } from './db.js';
 
 let ready = false;
+let initing = null;
+
+// safe to call repeatedly; retries until DB tables exist (e.g. first boot before migration)
+export async function ensurePush(log) {
+  if (ready) return true;
+  if (!initing) {
+    initing = initPush()
+      .then(() => true)
+      .catch((err) => {
+        if (log) log.warn({ err: err.message }, 'web push init failed');
+        return false;
+      })
+      .finally(() => { initing = null; });
+  }
+  return initing;
+}
 
 export async function initPush() {
   let pub = null; let priv = null;
@@ -33,7 +49,7 @@ export async function getVapidPublicKey() {
 
 // fire-and-forget push to all subscriptions of a user
 export async function pushToUser(userId, payload, log) {
-  if (!ready) return;
+  if (!ready && !(await ensurePush(log))) return;
   try {
     const { rows } = await q(
       `SELECT id, endpoint, p256dh, auth FROM push_subscription WHERE user_id = $1`, [userId]);
