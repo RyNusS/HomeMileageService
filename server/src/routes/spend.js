@@ -128,10 +128,15 @@ export async function spendRoutes(app) {
       await c.query(
         `INSERT INTO voucher_usage (voucher_id, used_minutes) VALUES ($1, $2)`,
         [v.id, v.remaining_minutes]);
-      return { used: v.remaining_minutes };
+      const lab = await c.query('SELECT label FROM voucher WHERE id = $1', [v.id]);
+      return { used: v.remaining_minutes, label: lab.rows[0].label };
     });
     if (result.error) return reply.code(result.code).send(result);
-    return result;
+    const who = await q('SELECT name FROM app_user WHERE id = $1', [req.user.sub]);
+    notifyFamily(req.user.family_id,
+      `[HMS] 🎟️ ${who.rows[0].name} 사용권 사용\n${result.label} ${result.used}분 (지금부터)`,
+      req.log);
+    return { used: result.used };
   });
 
   // consume minutes FIFO across active vouchers (partial use / batch use)
@@ -165,6 +170,10 @@ export async function spendRoutes(app) {
       return { used: minutes, remaining: available - minutes };
     });
     if (result.error) return reply.code(result.code).send(result);
+    const who2 = await q('SELECT name FROM app_user WHERE id = $1', [req.user.sub]);
+    notifyFamily(req.user.family_id,
+      `[HMS] 🎟️ ${who2.rows[0].name} 사용권 사용\n${result.used}분 (지금부터, 잔여 ${result.remaining}분)`,
+      req.log);
     return result;
   });
 }
