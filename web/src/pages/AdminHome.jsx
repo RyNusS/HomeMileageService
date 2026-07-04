@@ -84,7 +84,7 @@ export default function AdminHome({ me, refreshMe, logout }) {
           <h1>가족그룹 관리 🛠️</h1>
           <div className="who">{me.name} (관리자)</div>
         </div>
-        <div>
+        <div className="actions">
           <button onClick={() => setShowSettings(true)}>⚙️ 설정</button>
           <button onClick={logout}>로그아웃</button>
         </div>

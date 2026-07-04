@@ -1,9 +1,40 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { api, t } from '../api.js';
+import { api, getToken, t } from '../api.js';
 import { toast } from '../toast.jsx';
 import SettingsModal from '../settings.jsx';
 
 const fmtDT = (s) => new Date(s).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+// auth-protected proof photo: thumbnail + tap to enlarge
+function ProofThumb({ path }) {
+  const [url, setUrl] = useState(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let objUrl;
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/uploads/${path}`, {
+          headers: { authorization: `Bearer ${getToken()}` },
+        });
+        if (res.ok && alive) {
+          objUrl = URL.createObjectURL(await res.blob());
+          setUrl(objUrl);
+        }
+      } catch { /* thumbnail is best-effort */ }
+    })();
+    return () => { alive = false; if (objUrl) URL.revokeObjectURL(objUrl); };
+  }, [path]);
+  if (!url) return null;
+  return (<>
+    <img className="proof-thumb" src={url} alt="증빙 사진" onClick={() => setOpen(true)} />
+    {open && (
+      <div className="modal-bg photo" onClick={() => setOpen(false)}>
+        <img className="proof-full" src={url} alt="증빙 사진 크게 보기" />
+      </div>
+    )}
+  </>);
+}
 
 export default function ParentHome({ me, refreshMe, logout }) {
   const [tab, setTab] = useState('approve');
@@ -15,7 +46,7 @@ export default function ParentHome({ me, refreshMe, logout }) {
           <h1>{me.family_name} 관리</h1>
           <div className="who">{me.name} (부모)</div>
         </div>
-        <div>
+        <div className="actions">
           <button onClick={() => setShowSettings(true)}>⚙️ 설정</button>
           <button onClick={logout}>로그아웃</button>
         </div>
@@ -86,9 +117,9 @@ function ApproveTab() {
               <div className="name">{r.user_name} · {r.item_name} +{r.points}P</div>
               <div className="meta">
                 {fmtDT(r.created_at)}{r.comment ? ` · "${r.comment}"` : ''}
-                {r.proof_path && <> · <a href={`/api/uploads/${r.proof_path}`} target="_blank" rel="noreferrer">📷 사진</a></>}
               </div>
             </div>
+            {r.proof_path && <ProofThumb path={r.proof_path} />}
             <div style={{ display: 'flex', gap: 6 }}>
               <button className="small" onClick={() => decide(r, 'approve')}>승인</button>
               <button className="small danger" onClick={() => decide(r, 'reject')}>거절</button>

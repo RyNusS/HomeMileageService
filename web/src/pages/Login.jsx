@@ -32,7 +32,7 @@ export default function Login({ onLogin }) {
         <input value={loginId} onChange={(e) => setLoginId(e.target.value)}
           autoCapitalize="none" autoCorrect="off" placeholder="아이디" />
         <label className="fld">비밀번호 / PIN</label>
-        <input type="password" inputMode="numeric" value={secret}
+        <input type="password" value={secret}
           onChange={(e) => setSecret(e.target.value)} placeholder="비밀번호 또는 PIN" />
         <div style={{ height: 18 }} />
         <button className="primary" disabled={busy || !loginId || !secret}>로그인</button>

@@ -1,6 +1,7 @@
 // spend: buy (auto-deduct) -> vouchers (stock) or cash payout; consume vouchers FIFO
 import { q, tx } from '../db.js';
 import { notifyFamily } from '../telegram.js';
+import { pushToUser } from '../push.js';
 
 export async function spendRoutes(app) {
   // purchase
@@ -81,11 +82,16 @@ export async function spendRoutes(app) {
 
   // parent settles cash payout
   app.post('/orders/:id/settle', { onRequest: app.parentOnly }, async (req, reply) => {
-    const { rowCount } = await q(
+    const { rows } = await q(
       `UPDATE spend_order SET status = 'settled', settled_by = $1, settled_at = now()
-       WHERE id = $2 AND family_id = $3 AND status = 'payout_pending'`,
+       WHERE id = $2 AND family_id = $3 AND status = 'payout_pending'
+       RETURNING user_id`,
       [req.user.sub, req.params.id, req.user.family_id]);
-    if (!rowCount) return reply.code(404).send({ error: 'not_found_or_not_pending' });
+    if (!rows[0]) return reply.code(404).send({ error: 'not_found_or_not_pending' });
+    pushToUser(rows[0].user_id, {
+      title: '용돈 정산 완료 💰',
+      body: '용돈이 현금으로 지급되었어요',
+    }, req.log);
     return { ok: true };
   });
 

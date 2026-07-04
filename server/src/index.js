@@ -1,5 +1,12 @@
 // HMS API - Phase 1 (mileage core)
+import dns from 'node:dns';
+import net from 'node:net';
 import path from 'node:path';
+
+// Containers without an IPv6 route + long-RTT hosts (e.g. Telegram) break
+// fetch's happy-eyeballs defaults: prefer IPv4 and allow slower connects.
+dns.setDefaultResultOrder('ipv4first');
+net.setDefaultAutoSelectFamilyAttemptTimeout(2500);
 import fs from 'node:fs';
 import Fastify from 'fastify';
 import jwt from '@fastify/jwt';
@@ -12,6 +19,9 @@ import { earnRoutes } from './routes/earn.js';
 import { spendRoutes } from './routes/spend.js';
 import { ledgerRoutes } from './routes/ledger.js';
 import { adminRoutes } from './routes/admin.js';
+import { pushRoutes } from './routes/push.js';
+import { telegramRoutes } from './routes/telegram.js';
+import { initPush } from './push.js';
 
 const HOST = process.env.HOST || '0.0.0.0';
 const PORT = Number(process.env.PORT || 3000);
@@ -60,7 +70,7 @@ export function buildApp() {
   app.get('/api/health', async () => ({
     status: 'ok',
     service: 'hms-api',
-    version: process.env.APP_VERSION || '1.2.0',
+    version: process.env.APP_VERSION || '1.3.0',
     time: new Date().toISOString(),
   }));
 
@@ -84,14 +94,21 @@ export function buildApp() {
   app.register(spendRoutes, { prefix: '/api' });
   app.register(ledgerRoutes, { prefix: '/api' });
   app.register(adminRoutes, { prefix: '/api' });
+  app.register(pushRoutes, { prefix: '/api' });
+  app.register(telegramRoutes, { prefix: '/api' });
 
   return app;
 }
 
 if (process.argv[1] && process.argv[1].endsWith('index.js')) {
   const app = buildApp();
-  app.listen({ host: HOST, port: PORT }).catch((err) => {
-    app.log.error(err);
-    process.exit(1);
-  });
+  initPush()
+    .then(() => app.log.info('web push ready'))
+    .catch((err) => app.log.warn({ err: err.message }, 'web push init failed'))
+    .finally(() => {
+      app.listen({ host: HOST, port: PORT }).catch((err) => {
+        app.log.error(err);
+        process.exit(1);
+      });
+    });
 }

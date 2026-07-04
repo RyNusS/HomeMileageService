@@ -2,8 +2,9 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { q, tx } from '../db.js';
-import { notifyFamily } from '../telegram.js';
+import { q } from '../db.js';
+import { notifyFamily, earnRequestKeyboard } from '../telegram.js';
+import { decideEarnRequest } from '../earnService.js';
 
 export async function earnRoutes(app, opts) {
   const uploadDir = opts.uploadDir;
@@ -46,10 +47,11 @@ export async function earnRoutes(app, opts) {
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
       [req.user.family_id, req.user.sub, item.id, item.points, comment, proofPath]);
 
+    const reqId = Number(ins.rows[0].id);
     const who = await q('SELECT name FROM app_user WHERE id = $1', [req.user.sub]);
     notifyFamily(req.user.family_id,
-      `[HMS] ${who.rows[0].name} 적립 청구: ${item.name} +${item.points}P${comment ? ` (${comment})` : ''} — 앱에서 승인해 주세요`,
-      req.log);
+      `[HMS] ${who.rows[0].name} 적립 청구\n${item.name} +${item.points}P${comment ? `\n"${comment}"` : ''}`,
+      req.log, earnRequestKeyboard(reqId));
 
     return { id: Number(ins.rows[0].id), status: 'pending' };
   });
@@ -85,32 +87,14 @@ export async function earnRoutes(app, opts) {
   });
 
   async function decide(req, reply, approve) {
-    const result = await tx(async (c) => {
-      const { rows } = await c.query(
-        `SELECT id, user_id, points, status FROM earn_request
-         WHERE id = $1 AND family_id = $2 FOR UPDATE`,
-        [req.params.id, req.user.family_id]);
-      const r = rows[0];
-      if (!r) return { code: 404, error: 'not_found' };
-      if (r.status !== 'pending') return { code: 409, error: 'already_decided' };
-
-      await c.query(
-        `UPDATE earn_request SET status = $1, decided_by = $2, decided_at = now()
-         WHERE id = $3`, [approve ? 'approved' : 'rejected', req.user.sub, r.id]);
-
-      if (approve) {
-        await c.query(
-          `INSERT INTO ledger_entry (family_id, user_id, amount, source_type, source_id)
-           VALUES ($1, $2, $3, 'earn', $4)`,
-          [req.user.family_id, r.user_id, r.points, r.id]);
-        await c.query(
-          `UPDATE app_user SET balance_cache = balance_cache + $1 WHERE id = $2`,
-          [r.points, r.user_id]);
-      }
-      return { ok: true };
-    });
+    const result = await decideEarnRequest({
+      requestId: req.params.id,
+      familyId: req.user.family_id,
+      deciderId: req.user.sub,
+      approve,
+    }, req.log);
     if (result.error) return reply.code(result.code).send({ error: result.error });
-    return result;
+    return { ok: true };
   }
 
   app.post('/earn-requests/:id/approve', { onRequest: app.parentOnly },

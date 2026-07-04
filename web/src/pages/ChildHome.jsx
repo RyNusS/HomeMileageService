@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { api, t } from '../api.js';
 import { toast } from '../toast.jsx';
 import SettingsModal from '../settings.jsx';
+import { getSubscriptionState, enablePush } from '../pushClient.js';
 
 const fmtDT = (s) => new Date(s).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
@@ -9,6 +10,21 @@ export default function ChildHome({ me, refreshMe, logout }) {
   const [tab, setTab] = useState('home');
   const [showSettings, setShowSettings] = useState(false);
   const [vouchers, setVouchers] = useState({ remaining_minutes: 0, vouchers: [] });
+  const [pushState, setPushState] = useState('unknown');
+
+  useEffect(() => { getSubscriptionState().then(setPushState).catch(() => {}); }, []);
+
+  const turnOnPush = async () => {
+    try {
+      await enablePush();
+      setPushState('subscribed');
+      toast('알림이 켜졌어요! 승인 결과를 푸시로 알려드릴게요');
+    } catch (ex) {
+      if (ex.message === 'push_permission_denied') toast('알림 권한이 거부되었어요. 브라우저 설정에서 허용해 주세요', 'error');
+      else if (ex.message === 'push_unsupported') toast('이 브라우저는 푸시를 지원하지 않아요. 홈 화면에 앱을 추가한 뒤 시도해 보세요', 'error');
+      else toast('알림 설정에 실패했어요', 'error');
+    }
+  };
 
   const loadVouchers = useCallback(async () => {
     setVouchers(await api('GET', '/api/vouchers'));
@@ -24,12 +40,18 @@ export default function ChildHome({ me, refreshMe, logout }) {
           <h1>안녕, {me.name}! 👋</h1>
           <div className="who">{me.family_name}</div>
         </div>
-        <div>
+        <div className="actions">
           <button onClick={() => setShowSettings(true)}>⚙️ 설정</button>
           <button onClick={logout}>로그아웃</button>
         </div>
       </div>
       <div className="content">
+        {tab === 'home' && pushState === 'ready' && (
+          <div className="push-banner">
+            <div className="txt">🔔 적립 승인 소식을 푸시 알림으로 받아보세요</div>
+            <button className="small" onClick={turnOnPush}>알림 켜기</button>
+          </div>
+        )}
         {tab === 'home' && <HomeTab me={me} vouchers={vouchers} refreshAll={refreshAll} />}
         {tab === 'earn' && <EarnTab refreshAll={refreshAll} />}
         {tab === 'shop' && <ShopTab me={me} refreshAll={refreshAll} />}

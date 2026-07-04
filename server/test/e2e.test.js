@@ -16,6 +16,7 @@ process.env.DB_PASS = 'testpass';
 process.env.JWT_SECRET = 'test-secret';
 process.env.UPLOAD_DIR = mkdtempSync(path.join(tmpdir(), 'hmsup-'));
 process.env.TELEGRAM_BOT_TOKEN = '';
+process.env.TELEGRAM_WEBHOOK_SECRET = 'hook-secret-test';
 
 const pg = new EmbeddedPostgres({
   databaseDir: dataDir, user: 'hms_user', password: 'testpass', port: pgPort, persistent: false,
@@ -52,6 +53,10 @@ async function main() {
   await pool.query(sql);
   const sql2 = fs.readFileSync(new URL('../migrations/002_admin.sql', import.meta.url), 'utf8');
   await pool.query(sql2);
+  const sql3 = fs.readFileSync(new URL('../migrations/003_push.sql', import.meta.url), 'utf8');
+  await pool.query(sql3);
+  const { initPush } = await import('../src/push.js');
+  await initPush();
 
   const { hashSecret } = await import('../src/hash.js');
   await pool.query('SET search_path TO hms');
@@ -208,6 +213,55 @@ async function main() {
   await api('PATCH', `/api/admin/families/${fb.id}`, { name: 'B가족2' }, tokens.admin, 200);
   await api('DELETE', `/api/admin/families/${fb.id}`, null, tokens.admin, 200);
   await api('POST', '/api/auth/login', { login_id: 'pb', secret: 'bparent1' }, null, 401);
+
+  // --- v1.3.0: web push subscription CRUD
+  const vk = await api('GET', '/api/push/vapid-public-key', null, tokens.child, 200);
+  assert.ok(vk.key && vk.key.length > 20);
+  await api('POST', '/api/push/subscribe', {
+    endpoint: 'https://push.example/ep1', keys: { p256dh: 'pk', auth: 'au' },
+  }, tokens.child, 200);
+  await api('POST', '/api/push/subscribe', { endpoint: 'x' }, tokens.child, 400);
+  await api('POST', '/api/push/unsubscribe', { endpoint: 'https://push.example/ep1' }, tokens.child, 200);
+
+  // --- v1.3.0: telegram webhook inline approval
+  await pool.query(
+    `INSERT INTO telegram_link (family_id, parent_user_id, chat_id)
+     SELECT family_id, id, '9999' FROM app_user WHERE login_id = 'p1'`);
+  const r3 = await api('POST', '/api/earn-requests', { catalog_id: e1.id }, tokens.child, 200);
+  const meBefore = await api('GET', '/api/me', null, tokens.child, 200);
+  // wrong secret rejected
+  let res = await fetch(base + '/api/telegram/webhook', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': 'wrong' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(res.status, 403);
+  // approve via callback
+  res = await fetch(base + '/api/telegram/webhook', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': 'hook-secret-test' },
+    body: JSON.stringify({
+      callback_query: {
+        id: 'cbq1', data: `er_ok:${r3.id}`,
+        message: { message_id: 1, chat: { id: 9999 }, text: 'msg' },
+      },
+    }),
+  });
+  assert.equal(res.status, 200);
+  const meAfter = await api('GET', '/api/me', null, tokens.child, 200);
+  assert.equal(meAfter.balance, meBefore.balance + 20);
+  const decided = await api('GET', '/api/earn-requests?status=approved', null, tokens.parent, 200);
+  assert.ok(decided.find((x) => x.id === r3.id));
+  // duplicate callback -> no double credit
+  await fetch(base + '/api/telegram/webhook', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': 'hook-secret-test' },
+    body: JSON.stringify({
+      callback_query: { id: 'cbq2', data: `er_ok:${r3.id}`, message: { message_id: 1, chat: { id: 9999 }, text: 'msg' } },
+    }),
+  });
+  const meAfter2 = await api('GET', '/api/me', null, tokens.child, 200);
+  assert.equal(meAfter2.balance, meAfter.balance);
 
   console.log('ALL E2E TESTS PASSED');
 }
