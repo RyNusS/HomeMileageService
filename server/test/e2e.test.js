@@ -281,6 +281,38 @@ async function main() {
   const meAfter2 = await api('GET', '/api/me', null, tokens.child, 200);
   assert.equal(meAfter2.balance, meAfter.balance);
 
+  // --- ask callback: 부모 채팅 버튼 선택이 app_config에 저장된다 (v1.4.2)
+  res = await fetch(base + '/api/telegram/webhook', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': 'hook-secret-test' },
+    body: JSON.stringify({
+      callback_query: {
+        id: 'cbq3', data: 'ask:q_test1:yes',
+        message: { message_id: 2, chat: { id: 9999 }, text: 'question' },
+      },
+    }),
+  });
+  assert.equal(res.status, 200);
+  {
+    const { rows } = await pool.query(
+      "SELECT value FROM app_config WHERE key = 'ask_answer_q_test1'");
+    assert.equal(rows.length, 1);
+    assert.equal(JSON.parse(rows[0].value).choice, 'yes');
+  }
+
+  // --- consume silent/note 옵션 (v1.4.2): 파라미터 수용 + 정상 차감
+  {
+    await api('POST', `/api/users/${childId}/adjust`, { amount: 300, memo: '테스트 충전' }, tokens.parent, 200);
+    const o2 = await api('POST', '/api/orders', { catalog_id: s1.id, qty: 1 }, tokens.child, 200);
+    assert.equal(o2.status, 'fulfilled');
+    const c1 = await api('POST', '/api/vouchers/consume',
+      { minutes: 1, silent: true }, tokens.child, 200);
+    assert.equal(c1.used, 1);
+    const c2 = await api('POST', '/api/vouchers/consume',
+      { minutes: 1, note: 'PC 사용 시작 — 10분 예약' }, tokens.child, 200);
+    assert.equal(c2.used, 1);
+  }
+
   console.log('ALL E2E TESTS PASSED');
 }
 

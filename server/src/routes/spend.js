@@ -140,8 +140,13 @@ export async function spendRoutes(app) {
   });
 
   // consume minutes FIFO across active vouchers (partial use / batch use)
+  // 옵션(외부 세션 클라이언트용):
+  //   silent=true — 부모 알림 생략 (세션 중 분 단위 차감 시 알림 폭주 방지)
+  //   note        — 알림 문구 커스텀 (예: "PC 사용 시작 — 30분 예약"). note가 있으면 silent보다 우선.
   app.post('/vouchers/consume', { onRequest: app.authRequired }, async (req, reply) => {
     const minutes = Number(req.body && req.body.minutes);
+    const silent = !!(req.body && req.body.silent);
+    const note = req.body && req.body.note ? String(req.body.note).slice(0, 120) : null;
     if (!Number.isInteger(minutes) || minutes <= 0 || minutes > 24 * 60) {
       return reply.code(400).send({ error: 'bad_minutes' });
     }
@@ -170,10 +175,13 @@ export async function spendRoutes(app) {
       return { used: minutes, remaining: available - minutes };
     });
     if (result.error) return reply.code(result.code).send(result);
-    const who2 = await q('SELECT name FROM app_user WHERE id = $1', [req.user.sub]);
-    notifyFamily(req.user.family_id,
-      `[HMS] 🎟️ ${who2.rows[0].name} 사용권 사용\n${result.used}분 (지금부터, 잔여 ${result.remaining}분)`,
-      req.log);
+    if (note || !silent) {
+      const who2 = await q('SELECT name FROM app_user WHERE id = $1', [req.user.sub]);
+      const text = note
+        ? `[HMS] 🖥️ ${who2.rows[0].name} ${note} (잔여 ${result.remaining}분)`
+        : `[HMS] 🎟️ ${who2.rows[0].name} 사용권 사용\n${result.used}분 (지금부터, 잔여 ${result.remaining}분)`;
+      notifyFamily(req.user.family_id, text, req.log);
+    }
     return result;
   });
 }

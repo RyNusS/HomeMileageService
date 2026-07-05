@@ -15,6 +15,34 @@ export async function telegramRoutes(app) {
     const cb = update.callback_query;
     if (!cb || !cb.data) return { ok: true };
 
+    // 범용 질문 응답: ask:<질문ID>:<선택지> — 부모 채팅의 버튼 선택을 app_config에 저장.
+    // (원격 작업 중 부모에게 의사결정을 물을 때 사용. 조회는 서버 내부에서.)
+    const ask = /^ask:([A-Za-z0-9_-]{1,40}):([A-Za-z0-9_-]{1,40})$/.exec(cb.data);
+    if (ask) {
+      const chatId0 = cb.message && cb.message.chat && cb.message.chat.id;
+      const { rows: lk } = await q(
+        'SELECT family_id FROM telegram_link WHERE chat_id = $1 LIMIT 1', [String(chatId0)]);
+      if (!lk[0]) {
+        await tgCall('answerCallbackQuery', {
+          callback_query_id: cb.id, text: '등록되지 않은 채팅이에요', show_alert: true,
+        }, req.log);
+        return { ok: true };
+      }
+      await q(
+        `INSERT INTO app_config (key, value, updated_at) VALUES ($1, $2, now())
+         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = now()`,
+        [`ask_answer_${ask[1]}`, JSON.stringify({ choice: ask[2], at: new Date().toISOString() })]);
+      await tgCall('answerCallbackQuery', { callback_query_id: cb.id, text: '선택을 저장했어요!' }, req.log);
+      if (cb.message) {
+        await tgCall('editMessageText', {
+          chat_id: chatId0,
+          message_id: cb.message.message_id,
+          text: `${cb.message.text || ''}\n\n☑️ 선택: ${ask[2]}`,
+        }, req.log);
+      }
+      return { ok: true };
+    }
+
     const m = /^er_(ok|no):(\d+)$/.exec(cb.data);
     if (!m) {
       await tgCall('answerCallbackQuery', { callback_query_id: cb.id }, req.log);
