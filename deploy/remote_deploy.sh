@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# HMS deploy v1.4.2 (run on server). Bundle at /tmp/hms_deploy.tgz
+# HMS deploy v1.5.0 (run on server). Bundle at /tmp/hms_deploy.tgz
 set -euo pipefail
 cd ~/stacks
 TS=$(date +%Y%m%d%H%M%S)
@@ -13,7 +13,7 @@ grep -q '^DB_NAME=' hms.env || echo "DB_NAME=hms" >> hms.env
 grep -q '^DB_USER=' hms.env || echo "DB_USER=hms_user" >> hms.env
 grep -q '^DB_PASS=' hms.env || echo "DB_PASS=$(grep '^POSTGRES_PASSWORD=' hms.env | cut -d= -f2-)" >> hms.env
 grep -q '^UPLOAD_DIR=' hms.env || echo "UPLOAD_DIR=/data/uploads" >> hms.env
-grep -q '^APP_VERSION=' hms.env && sed -i 's/^APP_VERSION=.*/APP_VERSION=1.4.2/' hms.env || echo "APP_VERSION=1.4.2" >> hms.env
+grep -q '^APP_VERSION=' hms.env && sed -i 's/^APP_VERSION=.*/APP_VERSION=1.5.0/' hms.env || echo "APP_VERSION=1.5.0" >> hms.env
 grep -q '^SEED_FAMILY=' hms.env || echo "SEED_FAMILY=우리집" >> hms.env
 grep -q '^SEED_PARENT_ID=' hms.env || echo "SEED_PARENT_ID=parent" >> hms.env
 grep -q '^SEED_PARENT_NAME=' hms.env || echo "SEED_PARENT_NAME=부모" >> hms.env
@@ -25,6 +25,7 @@ grep -q '^SEED_ADMIN_ID=' hms.env || echo "SEED_ADMIN_ID=admin" >> hms.env
 DOMAIN=$(grep '^HMS_DOMAIN=' hms.env | cut -d= -f2-)
 grep -q '^PUBLIC_URL=' hms.env || echo "PUBLIC_URL=https://$DOMAIN" >> hms.env
 grep -q '^TELEGRAM_WEBHOOK_SECRET=' hms.env || echo "TELEGRAM_WEBHOOK_SECRET=$(openssl rand -hex 24)" >> hms.env
+grep -q '^OPS_TOKEN=' hms.env || echo "OPS_TOKEN=$(openssl rand -hex 24)" >> hms.env
 grep -q '^SEED_ADMIN_PW=' hms.env || echo "SEED_ADMIN_PW=$(openssl rand -base64 12 | tr -d '/+=' | cut -c1-12)" >> hms.env
 
 docker compose --env-file hms.env build hms-api 2>&1 | tail -2
@@ -57,7 +58,7 @@ if [ -n "$TG_TOKEN" ] && [ -n "$DOMAIN" ]; then
   curl -s "https://api.telegram.org/bot$TG_TOKEN/setWebhook" \
     -d "url=https://$DOMAIN/api/telegram/webhook" \
     -d "secret_token=$TG_SECRET" \
-    -d 'allowed_updates=["callback_query"]' \
+    -d 'allowed_updates=["callback_query","message"]' \
     -d "drop_pending_updates=true" | grep -o '"ok":[a-z]*' | sed 's/^/WEBHOOK_SET /'
   curl -s "https://api.telegram.org/bot$TG_TOKEN/getWebhookInfo" | grep -o '"url":"[^"]*"' | sed 's/^/WEBHOOK_INFO /'
 fi

@@ -21,6 +21,7 @@ import { ledgerRoutes } from './routes/ledger.js';
 import { adminRoutes } from './routes/admin.js';
 import { pushRoutes } from './routes/push.js';
 import { telegramRoutes } from './routes/telegram.js';
+import { opsRoutes } from './routes/ops.js';
 import { initPush } from './push.js';
 
 const HOST = process.env.HOST || '0.0.0.0';
@@ -70,7 +71,7 @@ export function buildApp() {
   app.get('/api/health', async () => ({
     status: 'ok',
     service: 'hms-api',
-    version: process.env.APP_VERSION || '1.3.0',
+    version: process.env.APP_VERSION || '1.5.0',
     time: new Date().toISOString(),
   }));
 
@@ -96,6 +97,7 @@ export function buildApp() {
   app.register(adminRoutes, { prefix: '/api' });
   app.register(pushRoutes, { prefix: '/api' });
   app.register(telegramRoutes, { prefix: '/api' });
+  app.register(opsRoutes, { prefix: '/api' });
 
   return app;
 }
