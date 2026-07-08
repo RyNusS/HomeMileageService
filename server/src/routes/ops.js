@@ -72,7 +72,7 @@ export async function opsRoutes(app) {
     if (!authed(req)) return reply.code(403).type('text/plain').send('FORBIDDEN');
     const id = okId(req.query.id);
     const { rows } = await q('SELECT value FROM app_config WHERE key = $1', [`ask_answer_${id}`]);
-    if (!rows[0]) return reply.type('text/plain').send('PENDING');
+    if (!rows[0]) return reply.type('text/plain; charset=utf-8').send('PENDING');
     let v = {};
     try { v = JSON.parse(rows[0].value); } catch { v = {}; }
     let label = '';
@@ -89,6 +89,6 @@ export async function opsRoutes(app) {
     if (String(req.query.consume || '') === '1') {
       await q('DELETE FROM app_config WHERE key IN ($1, $2)', [`ask_answer_${id}`, `ask_opts_${id}`]);
     }
-    return reply.type('text/plain').send(`ANSWER\t${label}`);
+    return reply.type('text/plain; charset=utf-8').send(`ANSWER\t${label}`);
   } });
 }
