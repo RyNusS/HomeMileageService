@@ -1,0 +1,21 @@
+{
+  "appId": "com.homemileage.app",
+  "appName": "홈 마일리지",
+  "webDir": "www",
+  "server": {
+    "url": "https://<SERVER_DOMAIN>",
+    "errorPath": "error.html"
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "launchAutoHide": true,
+      "backgroundColor": "#4f7cf7",
+      "showSpinner": false,
+      "androidScaleType": "CENTER_CROP"
+    }
+  }
+}

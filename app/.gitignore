@@ -1,0 +1,15 @@
+node_modules/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore.properties
+*.keystore
+*.jks
+*.apk
+*.aab
+android/build-*.txt
+
+# 실서버 도메인 포함 — 로컬 전용 (레포에는 *.example.* 만)
+capacitor.config.json
+www/config.js
