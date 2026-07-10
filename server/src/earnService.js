@@ -18,10 +18,11 @@ export async function decideEarnRequest({ requestId, familyId, deciderId, approv
        WHERE id = $3`, [approve ? 'approved' : 'rejected', deciderId, r.id]);
 
     if (approve) {
+      // memo에 항목명을 남겨 내역 화면에서 무엇으로 적립됐는지 보이게 한다
       await c.query(
-        `INSERT INTO ledger_entry (family_id, user_id, amount, source_type, source_id)
-         VALUES ($1, $2, $3, 'earn', $4)`,
-        [familyId, r.user_id, r.points, r.id]);
+        `INSERT INTO ledger_entry (family_id, user_id, amount, source_type, source_id, memo)
+         VALUES ($1, $2, $3, 'earn', $4, $5)`,
+        [familyId, r.user_id, r.points, r.id, r.item_name]);
       await c.query(
         `UPDATE app_user SET balance_cache = balance_cache + $1 WHERE id = $2`,
         [r.points, r.user_id]);

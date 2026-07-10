@@ -71,7 +71,7 @@ export function buildApp() {
   app.get('/api/health', async () => ({
     status: 'ok',
     service: 'hms-api',
-    version: process.env.APP_VERSION || '1.5.1',
+    version: process.env.APP_VERSION || '1.7.0',
     time: new Date().toISOString(),
   }));
 

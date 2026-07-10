@@ -30,5 +30,7 @@ export const ERR_KO = {
   login_id_taken: '이미 사용 중인 아이디예요',
   pin_must_be_4_6_digits: 'PIN은 숫자 4~6자리로 입력해 주세요',
   already_decided: '이미 처리된 청구예요',
+  daily_limit_reached: '오늘은 이 항목을 더 청구할 수 없어요 (1일 횟수 제한)',
+  bad_daily_limit: '1일 횟수는 1~9 사이로 입력해 주세요',
 };
 export const t = (e) => ERR_KO[e] || e;

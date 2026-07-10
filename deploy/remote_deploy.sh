@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# HMS deploy v1.5.1 (run on server). Bundle at /tmp/hms_deploy.tgz
+# HMS deploy v1.7.0 (run on server). Bundle at /tmp/hms_deploy.tgz
 set -euo pipefail
 cd ~/stacks
 TS=$(date +%Y%m%d%H%M%S)
@@ -13,7 +13,7 @@ grep -q '^DB_NAME=' hms.env || echo "DB_NAME=hms" >> hms.env
 grep -q '^DB_USER=' hms.env || echo "DB_USER=hms_user" >> hms.env
 grep -q '^DB_PASS=' hms.env || echo "DB_PASS=$(grep '^POSTGRES_PASSWORD=' hms.env | cut -d= -f2-)" >> hms.env
 grep -q '^UPLOAD_DIR=' hms.env || echo "UPLOAD_DIR=/data/uploads" >> hms.env
-grep -q '^APP_VERSION=' hms.env && sed -i 's/^APP_VERSION=.*/APP_VERSION=1.5.1/' hms.env || echo "APP_VERSION=1.5.1" >> hms.env
+grep -q '^APP_VERSION=' hms.env && sed -i 's/^APP_VERSION=.*/APP_VERSION=1.7.0/' hms.env || echo "APP_VERSION=1.7.0" >> hms.env
 grep -q '^SEED_FAMILY=' hms.env || echo "SEED_FAMILY=우리집" >> hms.env
 grep -q '^SEED_PARENT_ID=' hms.env || echo "SEED_PARENT_ID=parent" >> hms.env
 grep -q '^SEED_PARENT_NAME=' hms.env || echo "SEED_PARENT_NAME=부모" >> hms.env
@@ -55,9 +55,12 @@ sudo systemctl list-timers hms-backup.timer --no-pager | head -3
 TG_TOKEN=$(grep '^TELEGRAM_BOT_TOKEN=' hms.env | cut -d= -f2-)
 TG_SECRET=$(grep '^TELEGRAM_WEBHOOK_SECRET=' hms.env | cut -d= -f2-)
 if [ -n "$TG_TOKEN" ] && [ -n "$DOMAIN" ]; then
+  # 텔레그램 측 DNS 해석 실패 대비: 공인 IP를 함께 지정
+  PUB_IP=$(curl -s --max-time 10 https://api.ipify.org || true)
   curl -s "https://api.telegram.org/bot$TG_TOKEN/setWebhook" \
     -d "url=https://$DOMAIN/api/telegram/webhook" \
     -d "secret_token=$TG_SECRET" \
+    ${PUB_IP:+-d "ip_address=$PUB_IP"} \
     -d 'allowed_updates=["callback_query","message"]' \
     -d "drop_pending_updates=true" | grep -o '"ok":[a-z]*' | sed 's/^/WEBHOOK_SET /'
   curl -s "https://api.telegram.org/bot$TG_TOKEN/getWebhookInfo" | grep -o '"url":"[^"]*"' | sed 's/^/WEBHOOK_INFO /'

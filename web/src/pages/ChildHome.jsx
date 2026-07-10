@@ -123,7 +123,8 @@ function EarnTab({ refreshAll }) {
   const [photo, setPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { api('GET', '/api/catalog/earn').then(setItems); }, []);
+  const loadItems = useCallback(async () => setItems(await api('GET', '/api/catalog/earn')), []);
+  useEffect(() => { loadItems(); }, [loadItems]);
 
   const close = () => { setSel(null); setComment(''); setPhoto(null); };
 
@@ -137,7 +138,7 @@ function EarnTab({ refreshAll }) {
       await api('POST', '/api/earn-requests', fd);
       toast(`'${sel.name}' 청구 완료! 승인을 기다려 주세요`);
       close();
-      await refreshAll();
+      await refreshAll(); await loadItems();
     } catch (ex) { toast(t(ex.message), 'error'); }
     setBusy(false);
   };
@@ -146,15 +147,23 @@ function EarnTab({ refreshAll }) {
     <>
       <div className="section-title">할 일을 하고 마일리지를 받아요</div>
       <div className="card">
-        {items.map((it) => (
-          <div className="row" key={it.id}>
-            <div className="main">
-              <div className="name">{it.name}</div>
-              <div className="meta">+{it.points}P{it.proof_required ? ' · 📷 사진 필요' : ''}</div>
+        {items.map((it) => {
+          const capped = it.daily_limit && it.used_today >= it.daily_limit;
+          return (
+            <div className="row" key={it.id}>
+              <div className="main">
+                <div className="name" style={{ opacity: capped ? 0.45 : 1 }}>{it.name}</div>
+                <div className="meta">
+                  +{it.points}P{it.proof_required ? ' · 📷 사진 필요' : ''}
+                  {it.daily_limit ? ` · 오늘 ${Math.min(it.used_today, it.daily_limit)}/${it.daily_limit}회` : ''}
+                </div>
+              </div>
+              <button className="small" disabled={Boolean(capped)} onClick={() => setSel(it)}>
+                {capped ? '오늘 완료' : '청구'}
+              </button>
             </div>
-            <button className="small" onClick={() => setSel(it)}>청구</button>
-          </div>
-        ))}
+          );
+        })}
         {items.length === 0 && <p className="notice">적립 항목이 아직 없어요</p>}
       </div>
       {sel && (

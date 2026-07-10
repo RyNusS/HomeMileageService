@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { q } from '../db.js';
 import { notifyFamily, earnRequestKeyboard } from '../telegram.js';
 import { decideEarnRequest } from '../earnService.js';
+import { pushToParents } from '../push.js';
 
 export async function earnRoutes(app, opts) {
   const uploadDir = opts.uploadDir;
@@ -40,12 +41,26 @@ export async function earnRoutes(app, opts) {
     if (!catalogId) return reply.code(400).send({ error: 'catalog_id_required' });
 
     const { rows } = await q(
-      `SELECT id, name, points, proof_required FROM earn_catalog
+      `SELECT id, name, points, proof_required, daily_limit FROM earn_catalog
        WHERE id = $1 AND family_id = $2 AND active`,
       [catalogId, req.user.family_id]);
     const item = rows[0];
     if (!item) return reply.code(404).send({ error: 'catalog_not_found' });
     if (item.proof_required && !proofPath) return reply.code(400).send({ error: 'proof_required' });
+
+    // 1일 N회 제한: 오늘(Asia/Seoul) 대기+승인 건 수가 한도에 도달하면 차단.
+    // 거절/취소된 청구는 카운트에서 빠져 같은 날 재청구가 가능하다.
+    if (item.daily_limit) {
+      const { rows: cnt } = await q(
+        `SELECT count(*)::int AS n FROM earn_request
+         WHERE catalog_id = $1 AND user_id = $2 AND status IN ('pending','approved')
+           AND (created_at AT TIME ZONE 'Asia/Seoul')::date
+               = (now() AT TIME ZONE 'Asia/Seoul')::date`,
+        [item.id, req.user.sub]);
+      if (cnt[0].n >= item.daily_limit) {
+        return reply.code(409).send({ error: 'daily_limit_reached' });
+      }
+    }
 
     let ins;
     try {
@@ -66,6 +81,10 @@ export async function earnRoutes(app, opts) {
     notifyFamily(req.user.family_id,
       `[HMS] ${who.rows[0].name} 적립 청구\n${item.name} +${item.points}P${comment ? `\n"${comment}"` : ''}`,
       req.log, earnRequestKeyboard(reqId));
+    pushToParents(req.user.family_id, {
+      title: '적립 청구 도착 ⭐',
+      body: `${who.rows[0].name} · ${item.name} +${item.points}P — 승인해 주세요`,
+    }, req.log);
 
     return { id: Number(ins.rows[0].id), status: 'pending' };
   });

@@ -102,11 +102,45 @@ export async function adminRoutes(app) {
     return { ok: true };
   });
 
-  app.delete('/admin/users/:id', guard, async (req, reply) => {
+  // 비활성화 / 재활성화 (soft)
+  app.post('/admin/users/:id/deactivate', guard, async (req, reply) => {
     const { rowCount } = await q(
       `UPDATE app_user SET active = FALSE WHERE id = $1 AND role <> 'super_admin'`,
       [req.params.id]);
     if (!rowCount) return reply.code(404).send({ error: 'not_found' });
+    return { ok: true };
+  });
+
+  app.post('/admin/users/:id/activate', guard, async (req, reply) => {
+    const { rowCount } = await q(
+      `UPDATE app_user SET active = TRUE WHERE id = $1 AND role <> 'super_admin'`,
+      [req.params.id]);
+    if (!rowCount) return reply.code(404).send({ error: 'not_found' });
+    return { ok: true };
+  });
+
+  // 계정 완전 삭제 — 해당 계정의 모든 기록 포함 (되돌릴 수 없음)
+  app.delete('/admin/users/:id', guard, async (req, reply) => {
+    const uid = req.params.id;
+    const done = await tx(async (c) => {
+      const u = await c.query(
+        `SELECT id FROM app_user WHERE id = $1 AND role <> 'super_admin'`, [uid]);
+      if (!u.rows[0]) return false;
+      // 다른 행이 이 계정을 참조하는 컬럼은 NULL 처리 (처리자 기록)
+      await c.query('UPDATE earn_request SET decided_by = NULL WHERE decided_by = $1', [uid]);
+      await c.query('UPDATE spend_order SET settled_by = NULL WHERE settled_by = $1', [uid]);
+      // 본인 소유 데이터 삭제
+      await c.query('DELETE FROM voucher_usage WHERE voucher_id IN (SELECT id FROM voucher WHERE user_id = $1)', [uid]);
+      await c.query('DELETE FROM voucher WHERE user_id = $1', [uid]);
+      await c.query('DELETE FROM spend_order WHERE user_id = $1', [uid]);
+      await c.query('DELETE FROM earn_request WHERE user_id = $1', [uid]);
+      await c.query('DELETE FROM ledger_entry WHERE user_id = $1', [uid]);
+      await c.query('DELETE FROM push_subscription WHERE user_id = $1', [uid]);
+      await c.query('DELETE FROM telegram_link WHERE parent_user_id = $1', [uid]);
+      await c.query('DELETE FROM app_user WHERE id = $1', [uid]);
+      return true;
+    });
+    if (!done) return reply.code(404).send({ error: 'not_found' });
     return { ok: true };
   });
 }

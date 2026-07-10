@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { api, getToken, t } from '../api.js';
 import { toast } from '../toast.jsx';
 import SettingsModal from '../settings.jsx';
+import { getSubscriptionState, enablePush } from '../pushClient.js';
 
 const fmtDT = (s) => new Date(s).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
@@ -39,6 +40,22 @@ function ProofThumb({ path }) {
 export default function ParentHome({ me, refreshMe, logout }) {
   const [tab, setTab] = useState('approve');
   const [showSettings, setShowSettings] = useState(false);
+  const [pushState, setPushState] = useState('unknown');
+
+  useEffect(() => { getSubscriptionState().then(setPushState).catch(() => {}); }, []);
+
+  const turnOnPush = async () => {
+    try {
+      await enablePush();
+      setPushState('subscribed');
+      toast('알림이 켜졌어요! 적립 청구·사용권 사용 소식을 푸시로 알려드릴게요');
+    } catch (ex) {
+      if (ex.message === 'push_permission_denied') toast('알림 권한이 거부되었어요. 브라우저 설정에서 허용해 주세요', 'error');
+      else if (ex.message === 'push_unsupported') toast('이 브라우저는 푸시를 지원하지 않아요. 홈 화면에 앱을 추가한 뒤 시도해 보세요', 'error');
+      else toast(`알림 설정에 실패했어요 (${ex.message})`, 'error');
+    }
+  };
+
   return (
     <>
       <div className="topbar">
@@ -52,6 +69,12 @@ export default function ParentHome({ me, refreshMe, logout }) {
         </div>
       </div>
       <div className="content">
+        {tab === 'approve' && pushState === 'ready' && (
+          <div className="push-banner">
+            <div className="txt">🔔 적립 청구·사용권 사용 알림을 푸시로 받아보세요</div>
+            <button className="small" onClick={turnOnPush}>알림 켜기</button>
+          </div>
+        )}
         {tab === 'approve' && <ApproveTab />}
         {tab === 'family' && <FamilyTab />}
         {tab === 'catalog' && <CatalogTab />}
@@ -264,7 +287,10 @@ function CatalogTab() {
     setBusy(true);
     try {
       if (mode.cat === 'earn') {
-        const body = { name: f.name, points: Number(f.points), proof_required: Boolean(f.proof_required) };
+        const body = {
+          name: f.name, points: Number(f.points), proof_required: Boolean(f.proof_required),
+          daily_limit: f.daily_limit ? Number(f.daily_limit) : null,
+        };
         if (mode.item) await api('PATCH', `/api/catalog/earn/${mode.item.id}`, body);
         else await api('POST', '/api/catalog/earn', body);
       } else {
@@ -289,18 +315,63 @@ function CatalogTab() {
     } catch (ex) { toast(t(ex.message), 'error'); }
   };
 
+  // 순서 변경: 로컬 배열을 옮긴 뒤 전체 id 순서를 서버에 저장
+  const [drag, setDrag] = useState(null); // { cat, index }
+  const saveOrder = async (cat, list) => {
+    try {
+      await api('POST', `/api/catalog/${cat}/reorder`, { ids: list.map((x) => x.id) });
+    } catch (ex) { toast(t(ex.message), 'error'); await load(); }
+  };
+  const move = (cat, index, dir) => {
+    const list = cat === 'earn' ? [...earn] : [...spend];
+    const j = index + dir;
+    if (j < 0 || j >= list.length) return;
+    [list[index], list[j]] = [list[j], list[index]];
+    (cat === 'earn' ? setEarn : setSpend)(list);
+    saveOrder(cat, list);
+  };
+  const onDrop = (cat, index) => {
+    if (!drag || drag.cat !== cat || drag.index === index) { setDrag(null); return; }
+    const list = cat === 'earn' ? [...earn] : [...spend];
+    const [moved] = list.splice(drag.index, 1);
+    list.splice(index, 0, moved);
+    (cat === 'earn' ? setEarn : setSpend)(list);
+    setDrag(null);
+    saveOrder(cat, list);
+  };
+  const dragProps = (cat, index) => ({
+    draggable: true,
+    onDragStart: () => setDrag({ cat, index }),
+    onDragOver: (e) => e.preventDefault(),
+    onDrop: () => onDrop(cat, index),
+    onDragEnd: () => setDrag(null),
+    style: drag && drag.cat === cat && drag.index === index ? { opacity: 0.4 } : undefined,
+  });
+  const OrderBtns = ({ cat, index, len }) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <button className="small ghost" style={{ padding: '0 6px', lineHeight: '16px' }}
+        disabled={index === 0} onClick={() => move(cat, index, -1)}>▲</button>
+      <button className="small ghost" style={{ padding: '0 6px', lineHeight: '16px' }}
+        disabled={index === len - 1} onClick={() => move(cat, index, 1)}>▼</button>
+    </div>
+  );
+
   return (
     <>
       <div className="section-title">적립 항목</div>
       <div className="card">
-        {earn.map((it) => (
-          <div className="row" key={it.id}>
+        {earn.map((it, i) => (
+          <div className="row" key={it.id} {...dragProps('earn', i)}>
+            <OrderBtns cat="earn" index={i} len={earn.length} />
             <div className="main">
               <div className="name" style={{ opacity: it.active ? 1 : 0.4 }}>{it.name}</div>
-              <div className="meta">+{it.points}P{it.proof_required ? ' · 📷' : ''}{it.active ? '' : ' · 숨김'}</div>
+              <div className="meta">
+                +{it.points}P{it.proof_required ? ' · 📷' : ''}
+                {it.daily_limit ? ` · 1일 ${it.daily_limit}회` : ''}{it.active ? '' : ' · 숨김'}
+              </div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
-              <button className="small ghost" onClick={() => { setMode({ cat: 'earn', item: it }); setF({ ...it }); }}>수정</button>
+              <button className="small ghost" onClick={() => { setMode({ cat: 'earn', item: it }); setF({ ...it, daily_limit: it.daily_limit || '' }); }}>수정</button>
               <button className="small ghost" onClick={() => toggle('earn', it)}>{it.active ? '숨김' : '표시'}</button>
             </div>
           </div>
@@ -311,8 +382,9 @@ function CatalogTab() {
       </div>
       <div className="section-title">상점 항목 (가격표)</div>
       <div className="card">
-        {spend.map((it) => (
-          <div className="row" key={it.id}>
+        {spend.map((it, i) => (
+          <div className="row" key={it.id} {...dragProps('spend', i)}>
+            <OrderBtns cat="spend" index={i} len={spend.length} />
             <div className="main">
               <div className="name" style={{ opacity: it.active ? 1 : 0.4 }}>
                 {it.kind === 'cash' ? '💰' : '🎟️'} {it.name}
@@ -345,6 +417,13 @@ function CatalogTab() {
                 <input type="checkbox" style={{ width: 'auto' }} checked={Boolean(f.proof_required)}
                   onChange={(e) => setF({ ...f, proof_required: e.target.checked })} /> 사진 인증 필요
               </label>
+              <label className="fld">1일 청구 횟수 제한</label>
+              <select value={f.daily_limit || ''} onChange={(e) => setF({ ...f, daily_limit: e.target.value })}>
+                <option value="">제한 없음</option>
+                <option value="1">1일 1회</option>
+                <option value="2">1일 2회</option>
+                <option value="3">1일 3회</option>
+              </select>
             </>) : (<>
               <label className="fld">종류</label>
               <select value={f.kind || 'time_voucher'} onChange={(e) => setF({ ...f, kind: e.target.value })} disabled={Boolean(mode.item)}>

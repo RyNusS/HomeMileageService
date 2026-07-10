@@ -47,6 +47,18 @@ export async function getVapidPublicKey() {
   return rows[0] ? rows[0].value : null;
 }
 
+// fire-and-forget push to every active parent of a family (텔레그램과 병행하는 부모 알림)
+export async function pushToParents(familyId, payload, log) {
+  try {
+    const { rows } = await q(
+      `SELECT id FROM app_user WHERE family_id = $1 AND role = 'parent' AND active`,
+      [familyId]);
+    await Promise.all(rows.map((r) => pushToUser(r.id, payload, log)));
+  } catch (err) {
+    if (log) log.warn({ err: err.message }, 'parent push error');
+  }
+}
+
 // fire-and-forget push to all subscriptions of a user
 export async function pushToUser(userId, payload, log) {
   if (!ready && !(await ensurePush(log))) return;

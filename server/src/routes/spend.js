@@ -1,7 +1,7 @@
 // spend: buy (auto-deduct) -> vouchers (stock) or cash payout; consume vouchers FIFO
 import { q, tx } from '../db.js';
 import { notifyFamily } from '../telegram.js';
-import { pushToUser } from '../push.js';
+import { pushToUser, pushToParents } from '../push.js';
 
 export async function spendRoutes(app) {
   // purchase
@@ -57,6 +57,10 @@ export async function spendRoutes(app) {
       notifyFamily(req.user.family_id,
         `[HMS] ${who.rows[0].name} 용돈 교환 신청: ${result.name} (-${result.total}P) — 현금 지급 후 정산완료 처리해 주세요`,
         req.log);
+      pushToParents(req.user.family_id, {
+        title: '용돈 교환 신청 💰',
+        body: `${who.rows[0].name} · ${result.name} (-${result.total}P) — 현금 지급 후 정산해 주세요`,
+      }, req.log);
     }
     return result;
   });
@@ -136,6 +140,10 @@ export async function spendRoutes(app) {
     notifyFamily(req.user.family_id,
       `[HMS] 🎟️ ${who.rows[0].name} 사용권 사용\n${result.label} ${result.used}분 (지금부터)`,
       req.log);
+    pushToParents(req.user.family_id, {
+      title: '사용권 사용 🎟️',
+      body: `${who.rows[0].name} · ${result.label} ${result.used}분 (지금부터)`,
+    }, req.log);
     return { used: result.used };
   });
 
@@ -181,6 +189,12 @@ export async function spendRoutes(app) {
         ? `[HMS] 🖥️ ${who2.rows[0].name} ${note} (잔여 ${result.remaining}분)`
         : `[HMS] 🎟️ ${who2.rows[0].name} 사용권 사용\n${result.used}분 (지금부터, 잔여 ${result.remaining}분)`;
       notifyFamily(req.user.family_id, text, req.log);
+      pushToParents(req.user.family_id, {
+        title: '사용권 사용 🎟️',
+        body: note
+          ? `${who2.rows[0].name} · ${note} (잔여 ${result.remaining}분)`
+          : `${who2.rows[0].name} · ${result.used}분 사용 (잔여 ${result.remaining}분)`,
+      }, req.log);
     }
     return result;
   });

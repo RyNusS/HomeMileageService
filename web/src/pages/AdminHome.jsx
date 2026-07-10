@@ -42,11 +42,29 @@ export default function AdminHome({ me, refreshMe, logout }) {
     } catch (ex) { toast(t(ex.message), 'error'); }
   };
 
-  const removeUser = async (fid, u) => {
-    if (!window.confirm(`'${u.name}' 계정을 비활성화할까요?`)) return;
+  const deactivateUser = async (fid, u) => {
+    if (!window.confirm(`'${u.name}' 계정을 비활성화할까요?\n(로그인만 막히고 기록은 보존돼요. 언제든 다시 활성화할 수 있어요)`)) return;
+    try {
+      await api('POST', `/api/admin/users/${u.id}/deactivate`);
+      toast(`${u.name} 계정을 비활성화했어요`);
+      await loadMembers(fid); await load();
+    } catch (ex) { toast(t(ex.message), 'error'); }
+  };
+
+  const activateUser = async (fid, u) => {
+    try {
+      await api('POST', `/api/admin/users/${u.id}/activate`);
+      toast(`${u.name} 계정을 다시 활성화했어요`);
+      await loadMembers(fid); await load();
+    } catch (ex) { toast(t(ex.message), 'error'); }
+  };
+
+  const deleteUser = async (fid, u) => {
+    if (!window.confirm(`'${u.name}' 계정을 완전히 삭제할까요?\n적립·사용 내역 등 모든 기록이 함께 삭제되며 되돌릴 수 없어요.`)) return;
+    if (!window.confirm('정말 삭제할까요? 이 작업은 취소할 수 없어요.')) return;
     try {
       await api('DELETE', `/api/admin/users/${u.id}`);
-      toast(`${u.name} 계정을 비활성화했어요`);
+      toast(`${u.name} 계정을 삭제했어요`);
       await loadMembers(fid); await load();
     } catch (ex) { toast(t(ex.message), 'error'); }
   };
@@ -116,7 +134,10 @@ export default function AdminHome({ me, refreshMe, logout }) {
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button className="small ghost" onClick={() => { setMode({ type: 'resetPw', user: u }); setF({}); }}>비밀번호</button>
-                  {u.active && <button className="small danger" onClick={() => removeUser(fam.id, u)}>비활성</button>}
+                  {u.active
+                    ? <button className="small ghost" onClick={() => deactivateUser(fam.id, u)}>비활성</button>
+                    : <button className="small" onClick={() => activateUser(fam.id, u)}>활성화</button>}
+                  <button className="small danger" onClick={() => deleteUser(fam.id, u)}>삭제</button>
                 </div>
               </div>
             ))}
