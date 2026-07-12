@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { api, t } from '../api.js';
 import { toast } from '../toast.jsx';
 import SettingsModal from '../settings.jsx';
@@ -122,11 +122,17 @@ function EarnTab({ refreshAll }) {
   const [comment, setComment] = useState('');
   const [photo, setPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
+  const cameraRef = useRef(null);
+  const albumRef = useRef(null);
 
   const loadItems = useCallback(async () => setItems(await api('GET', '/api/catalog/earn')), []);
   useEffect(() => { loadItems(); }, [loadItems]);
 
   const close = () => { setSel(null); setComment(''); setPhoto(null); };
+  const pickPhoto = (e) => {
+    setPhoto(e.target.files[0] || null);
+    e.target.value = ''; // allow re-selecting the same file
+  };
 
   const submit = async () => {
     setBusy(true);
@@ -176,7 +182,29 @@ function EarnTab({ refreshAll }) {
             <label className="fld">한마디 (선택)</label>
             <input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="예: 수학 숙제 다 했어요" />
             <label className="fld">사진 {sel.proof_required ? '(필수)' : '(선택)'}</label>
-            <input type="file" accept="image/*" onChange={(e) => setPhoto(e.target.files[0] || null)} />
+            <input ref={cameraRef} type="file" accept="image/*" capture="environment"
+              style={{ display: 'none' }} onChange={pickPhoto} />
+            <input ref={albumRef} type="file" accept="image/*"
+              style={{ display: 'none' }} onChange={pickPhoto} />
+            {!photo ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="small" style={{ flex: 1 }} onClick={() => cameraRef.current.click()}>
+                  📷 촬영하기
+                </button>
+                <button className="small ghost" style={{ flex: 1 }} onClick={() => albumRef.current.click()}>
+                  🖼️ 앨범에서 선택
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <img src={URL.createObjectURL(photo)} alt="첨부 사진"
+                  style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 10 }} />
+                <div style={{ flex: 1, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  사진 1장 첨부됨
+                </div>
+                <button className="small danger" onClick={() => setPhoto(null)}>지우기</button>
+              </div>
+            )}
             <div className="btn-row">
               <button className="primary" disabled={busy || (sel.proof_required && !photo)} onClick={submit}>
                 적립 청구하기
@@ -332,6 +360,7 @@ function HistoryTab() {
   return (
     <div className="card">
       <h3>마일리지 내역</h3>
+      <p className="notice">최근 30일의 내역이 표시돼요</p>
       {rows.map((r) => (
         <div className="row" key={r.id}>
           <div className="main">
