@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# HMS deploy v1.9.0 (run on server). Bundle at /tmp/hms_deploy.tgz
+# HMS deploy v1.10.0 (run on server). Bundle at /tmp/hms_deploy.tgz
 set -euo pipefail
 cd ~/stacks
 TS=$(date +%Y%m%d%H%M%S)
@@ -13,7 +13,7 @@ grep -q '^DB_NAME=' hms.env || echo "DB_NAME=hms" >> hms.env
 grep -q '^DB_USER=' hms.env || echo "DB_USER=hms_user" >> hms.env
 grep -q '^DB_PASS=' hms.env || echo "DB_PASS=$(grep '^POSTGRES_PASSWORD=' hms.env | cut -d= -f2-)" >> hms.env
 grep -q '^UPLOAD_DIR=' hms.env || echo "UPLOAD_DIR=/data/uploads" >> hms.env
-grep -q '^APP_VERSION=' hms.env && sed -i 's/^APP_VERSION=.*/APP_VERSION=1.9.0/' hms.env || echo "APP_VERSION=1.9.0" >> hms.env
+grep -q '^APP_VERSION=' hms.env && sed -i 's/^APP_VERSION=.*/APP_VERSION=1.10.0/' hms.env || echo "APP_VERSION=1.10.0" >> hms.env
 grep -q '^SEED_FAMILY=' hms.env || echo "SEED_FAMILY=우리집" >> hms.env
 grep -q '^SEED_PARENT_ID=' hms.env || echo "SEED_PARENT_ID=parent" >> hms.env
 grep -q '^SEED_PARENT_NAME=' hms.env || echo "SEED_PARENT_NAME=부모" >> hms.env

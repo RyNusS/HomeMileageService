@@ -1,5 +1,9 @@
-// Minimal service worker: app-shell cache (network-first for API, cache-first for assets)
-const CACHE = 'hms-v1';
+// Service worker:
+//  - navigations (app shell / index.html): NETWORK-FIRST so new deploys show up
+//    immediately (fixes stale UI after an update), cache as offline fallback.
+//  - hashed static assets: cache-first (filenames change per build, so it's safe).
+//  - API (/api/*): bypass the SW entirely.
+const CACHE = 'hms-v2';
 self.addEventListener('install', (e) => { self.skipWaiting(); });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((keys) =>
@@ -9,6 +13,25 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.pathname.startsWith('/api/')) return;
+
+  const isNavigation = e.request.mode === 'navigate'
+    || (e.request.destination === 'document');
+
+  if (isNavigation) {
+    // network-first: always try to get the freshest shell
+    e.respondWith(
+      fetch(e.request).then((res) => {
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, clone));
+        }
+        return res;
+      }).catch(() => caches.match(e.request).then((hit) => hit || caches.match('/index.html')))
+    );
+    return;
+  }
+
+  // static assets: cache-first with background refresh
   e.respondWith(
     caches.match(e.request).then((hit) => {
       const fetching = fetch(e.request).then((res) => {

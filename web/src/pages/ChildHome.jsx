@@ -11,8 +11,27 @@ export default function ChildHome({ me, refreshMe, logout }) {
   const [showSettings, setShowSettings] = useState(false);
   const [vouchers, setVouchers] = useState({ remaining_minutes: 0, vouchers: [] });
   const [pushState, setPushState] = useState('unknown');
+  const [tick, setTick] = useState(0);        // 자동 새로고침 트리거
+  const contentRef = useRef(null);
+  const [ptr, setPtr] = useState(0);          // 당겨서 새로고침: 당긴 거리(px)
+  const pullStart = useRef(null);
+  const refreshing = useRef(false);
 
   useEffect(() => { getSubscriptionState().then(setPushState).catch(() => {}); }, []);
+
+  // 자동 새로고침: 20초마다 + 앱이 다시 보이거나 포커스될 때
+  useEffect(() => {
+    const bump = () => setTick((t) => t + 1);
+    const iv = setInterval(bump, 20000);
+    const onVis = () => { if (document.visibilityState === 'visible') bump(); };
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', bump);
+    return () => {
+      clearInterval(iv);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', bump);
+    };
+  }, []);
 
   const turnOnPush = async () => {
     try {
@@ -33,6 +52,31 @@ export default function ChildHome({ me, refreshMe, logout }) {
 
   const refreshAll = async () => { await refreshMe(); await loadVouchers(); };
 
+  // tick이 바뀌면 잔액·사용권을 조용히 다시 불러온다 (탭 데이터는 각 탭이 tick으로 갱신)
+  useEffect(() => { if (tick > 0) refreshAll(); }, [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 당겨서 새로고침: 맨 위에서 아래로 충분히 당기면 새로고침
+  const onTouchStart = (e) => {
+    const el = contentRef.current;
+    pullStart.current = el && el.scrollTop <= 0 ? e.touches[0].clientY : null;
+  };
+  const onTouchMove = (e) => {
+    if (pullStart.current == null || refreshing.current) return;
+    const dy = e.touches[0].clientY - pullStart.current;
+    if (dy > 0) setPtr(Math.min(dy * 0.5, 80));
+  };
+  const onTouchEnd = () => {
+    if (pullStart.current == null) return;
+    pullStart.current = null;
+    if (ptr >= 60) {
+      refreshing.current = true;
+      setPtr(46);
+      window.location.reload();
+    } else {
+      setPtr(0);
+    }
+  };
+
   return (
     <>
       <div className="topbar">
@@ -45,18 +89,22 @@ export default function ChildHome({ me, refreshMe, logout }) {
           <button onClick={logout}>로그아웃</button>
         </div>
       </div>
-      <div className="content">
+      <div className="content" ref={contentRef}
+        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+        <div className="ptr" style={{ height: ptr }}>
+          <span className={`ptr-ico ${refreshing.current ? 'spin' : (ptr >= 60 ? 'ready' : '')}`}>↻</span>
+        </div>
         {tab === 'home' && pushState === 'ready' && (
           <div className="push-banner">
             <div className="txt">🔔 적립 승인 소식을 푸시 알림으로 받아보세요</div>
             <button className="small" onClick={turnOnPush}>알림 켜기</button>
           </div>
         )}
-        {tab === 'home' && <HomeTab me={me} vouchers={vouchers} refreshAll={refreshAll} />}
-        {tab === 'earn' && <EarnTab refreshAll={refreshAll} />}
-        {tab === 'shop' && <ShopTab me={me} refreshAll={refreshAll} />}
+        {tab === 'home' && <HomeTab me={me} vouchers={vouchers} refreshAll={refreshAll} tick={tick} />}
+        {tab === 'earn' && <EarnTab refreshAll={refreshAll} tick={tick} />}
+        {tab === 'shop' && <ShopTab me={me} refreshAll={refreshAll} tick={tick} />}
         {tab === 'voucher' && <VoucherTab vouchers={vouchers} refreshAll={refreshAll} />}
-        {tab === 'history' && <HistoryTab />}
+        {tab === 'history' && <HistoryTab tick={tick} />}
       </div>
       {showSettings && <SettingsModal me={me} refreshMe={refreshMe} onClose={() => setShowSettings(false)} />}
       <nav className="tabbar">
@@ -71,10 +119,10 @@ export default function ChildHome({ me, refreshMe, logout }) {
   );
 }
 
-function HomeTab({ me, vouchers, refreshAll }) {
+function HomeTab({ me, vouchers, refreshAll, tick }) {
   const [reqs, setReqs] = useState([]);
   const load = useCallback(async () => setReqs(await api('GET', '/api/earn-requests')), []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, tick]);
 
   const cancel = async (r) => {
     if (!window.confirm(`'${r.item_name}' 청구를 취소할까요?`)) return;
@@ -116,7 +164,7 @@ function HomeTab({ me, vouchers, refreshAll }) {
   );
 }
 
-function EarnTab({ refreshAll }) {
+function EarnTab({ refreshAll, tick }) {
   const [items, setItems] = useState([]);
   const [sel, setSel] = useState(null);
   const [comment, setComment] = useState('');
@@ -126,7 +174,7 @@ function EarnTab({ refreshAll }) {
   const albumRef = useRef(null);
 
   const loadItems = useCallback(async () => setItems(await api('GET', '/api/catalog/earn')), []);
-  useEffect(() => { loadItems(); }, [loadItems]);
+  useEffect(() => { loadItems(); }, [loadItems, tick]);
 
   const close = () => { setSel(null); setComment(''); setPhoto(null); };
   const pickPhoto = (e) => {
@@ -218,13 +266,13 @@ function EarnTab({ refreshAll }) {
   );
 }
 
-function ShopTab({ me, refreshAll }) {
+function ShopTab({ me, refreshAll, tick }) {
   const [items, setItems] = useState([]);
   const [sel, setSel] = useState(null);
   const [qty, setQty] = useState(1);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { api('GET', '/api/catalog/spend').then(setItems); }, []);
+  useEffect(() => { api('GET', '/api/catalog/spend').then(setItems); }, [tick]);
 
   const open = (it) => {
     if (me.balance < it.price_points) {
@@ -353,9 +401,9 @@ function VoucherTab({ vouchers, refreshAll }) {
   );
 }
 
-function HistoryTab() {
+function HistoryTab({ tick }) {
   const [rows, setRows] = useState([]);
-  useEffect(() => { api('GET', '/api/ledger').then(setRows); }, []);
+  useEffect(() => { api('GET', '/api/ledger').then(setRows); }, [tick]);
   const label = { earn: '적립', spend: '사용', adjust: '보정' };
   return (
     <div className="card">

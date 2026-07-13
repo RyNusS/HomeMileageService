@@ -11,7 +11,7 @@ body {
 }
 #root { max-width: 480px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column; }
 
-.topbar { padding: 16px 20px 12px; display: flex; justify-content: space-between; align-items: center; }
+.topbar { padding: calc(16px + env(safe-area-inset-top)) 20px 12px; display: flex; justify-content: space-between; align-items: center; }
 .topbar h1 { font-size: 18px; }
 .topbar .who { font-size: 13px; color: var(--sub); }
 .topbar button { background: none; border: none; color: var(--sub); font-size: 13px; cursor: pointer; }
@@ -21,6 +21,12 @@ body {
 .push-banner .txt { font-size: 13px; color: #7a5b12; }
 
 .content { flex: 1; padding: 0 16px 90px; overflow-y: auto; }
+
+.ptr { display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }
+.ptr-ico { font-size: 22px; color: var(--sub); padding-bottom: 8px; transition: transform .2s, color .2s; }
+.ptr-ico.ready { color: var(--blue); transform: rotate(180deg); }
+.ptr-ico.spin { color: var(--blue); animation: ptr-rot .8s linear infinite; }
+@keyframes ptr-rot { to { transform: rotate(360deg); } }
 
 .balance-card {
   background: linear-gradient(135deg, var(--blue), #7c5cf7);
@@ -80,7 +86,7 @@ label.fld { display: block; font-size: 13px; color: var(--sub); margin: 10px 0 6
 .tabbar button.on { color: var(--blue); font-weight: 700; }
 .tabbar .ico { display: block; font-size: 20px; margin-bottom: 2px; }
 
-.login-wrap { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 32px 24px; }
+.login-wrap { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: calc(32px + env(safe-area-inset-top)) 24px 32px; }
 .login-wrap .logo { text-align: center; margin-bottom: 28px; }
 .login-wrap .logo .mark { font-size: 44px; }
 .login-wrap .logo h1 { font-size: 22px; margin-top: 8px; }
