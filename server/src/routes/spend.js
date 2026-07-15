@@ -117,6 +117,26 @@ export async function spendRoutes(app) {
     };
   });
 
+  // voucher usage history — 사용권을 언제 몇 분 썼는지 (최근 30일)
+  // 분 단위 FIFO 차감(/vouchers/consume)은 1분짜리 기록이 많이 쌓이므로
+  // 사용권×날짜(Asia/Seoul) 단위로 묶어 합산해서 돌려준다.
+  app.get('/vouchers/usage', { onRequest: app.authRequired }, async (req) => {
+    const userId = req.user.role === 'child' ? req.user.sub : (req.query.user_id || req.user.sub);
+    const { rows } = await q(
+      `SELECT v.id AS voucher_id, v.label, v.total_minutes,
+              (vu.used_at AT TIME ZONE 'Asia/Seoul')::date AS used_date,
+              MIN(vu.used_at) AS first_used_at,
+              SUM(vu.used_minutes)::int AS used_minutes
+       FROM voucher_usage vu
+       JOIN voucher v ON v.id = vu.voucher_id
+       WHERE v.user_id = $1 AND v.family_id = $2
+         AND vu.used_at >= now() - interval '30 days'
+       GROUP BY v.id, v.label, v.total_minutes, used_date
+       ORDER BY first_used_at DESC LIMIT 100`,
+      [userId, req.user.family_id]);
+    return rows.map((r) => ({ ...r, voucher_id: Number(r.voucher_id) }));
+  });
+
   // use one voucher entirely (consume its remaining minutes)
   app.post('/vouchers/:id/use', { onRequest: app.authRequired }, async (req, reply) => {
     const result = await tx(async (c) => {

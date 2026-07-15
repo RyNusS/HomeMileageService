@@ -3,6 +3,7 @@ import { api, t } from '../api.js';
 import { toast } from '../toast.jsx';
 import SettingsModal from '../settings.jsx';
 import { getSubscriptionState, enablePush } from '../pushClient.js';
+import usePullToRefresh from '../pullToRefresh.js';
 
 const fmtDT = (s) => new Date(s).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
@@ -13,9 +14,7 @@ export default function ChildHome({ me, refreshMe, logout }) {
   const [pushState, setPushState] = useState('unknown');
   const [tick, setTick] = useState(0);        // 자동 새로고침 트리거
   const contentRef = useRef(null);
-  const [ptr, setPtr] = useState(0);          // 당겨서 새로고침: 당긴 거리(px)
-  const pullStart = useRef(null);
-  const refreshing = useRef(false);
+  const { ptr, refreshing, handlers } = usePullToRefresh(contentRef); // 당겨서 새로고침
 
   useEffect(() => { getSubscriptionState().then(setPushState).catch(() => {}); }, []);
 
@@ -55,28 +54,6 @@ export default function ChildHome({ me, refreshMe, logout }) {
   // tick이 바뀌면 잔액·사용권을 조용히 다시 불러온다 (탭 데이터는 각 탭이 tick으로 갱신)
   useEffect(() => { if (tick > 0) refreshAll(); }, [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 당겨서 새로고침: 맨 위에서 아래로 충분히 당기면 새로고침
-  const onTouchStart = (e) => {
-    const el = contentRef.current;
-    pullStart.current = el && el.scrollTop <= 0 ? e.touches[0].clientY : null;
-  };
-  const onTouchMove = (e) => {
-    if (pullStart.current == null || refreshing.current) return;
-    const dy = e.touches[0].clientY - pullStart.current;
-    if (dy > 0) setPtr(Math.min(dy * 0.5, 80));
-  };
-  const onTouchEnd = () => {
-    if (pullStart.current == null) return;
-    pullStart.current = null;
-    if (ptr >= 60) {
-      refreshing.current = true;
-      setPtr(46);
-      window.location.reload();
-    } else {
-      setPtr(0);
-    }
-  };
-
   return (
     <>
       <div className="topbar">
@@ -89,8 +66,7 @@ export default function ChildHome({ me, refreshMe, logout }) {
           <button onClick={logout}>로그아웃</button>
         </div>
       </div>
-      <div className="content" ref={contentRef}
-        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+      <div className="content" ref={contentRef} {...handlers}>
         <div className="ptr" style={{ height: ptr }}>
           <span className={`ptr-ico ${refreshing.current ? 'spin' : (ptr >= 60 ? 'ready' : '')}`}>↻</span>
         </div>
@@ -403,21 +379,46 @@ function VoucherTab({ vouchers, refreshAll }) {
 
 function HistoryTab({ tick }) {
   const [rows, setRows] = useState([]);
-  useEffect(() => { api('GET', '/api/ledger').then(setRows); }, [tick]);
-  const label = { earn: '적립', spend: '사용', adjust: '보정' };
+
+  useEffect(() => {
+    (async () => {
+      // 마일리지 원장(적립/구매/보정) + 사용권 사용 기록을 시간순으로 합친다
+      const [ledger, usage] = await Promise.all([
+        api('GET', '/api/ledger'),
+        api('GET', '/api/vouchers/usage').catch(() => []),
+      ]);
+      const label = { earn: '적립', spend: '구매', adjust: '보정' };
+      const merged = [
+        ...ledger.map((r) => ({
+          key: `l${r.id}`, when: r.created_at, kind: label[r.source_type],
+          name: r.memo || label[r.source_type],
+          right: `${r.amount > 0 ? '+' : ''}${r.amount}P`,
+          rightClass: r.amount > 0 ? 'amt-plus' : 'amt-minus',
+        })),
+        ...usage.map((u) => ({
+          key: `u${u.voucher_id}-${u.first_used_at}`, when: u.first_used_at, kind: '사용',
+          name: `🎟️ ${u.label} 사용`,
+          right: `${u.used_minutes}분/${u.total_minutes}분`,
+          rightClass: 'amt-minus',
+        })),
+      ].sort((a, b) => new Date(b.when) - new Date(a.when));
+      setRows(merged);
+    })();
+  }, [tick]);
+
   return (
     <div className="card">
       <h3>마일리지 내역</h3>
       <p className="notice">최근 30일의 내역이 표시돼요</p>
       {rows.map((r) => (
-        <div className="row" key={r.id}>
+        <div className="row" key={r.key}>
           <div className="main">
-            <div className="name">{r.memo || label[r.source_type]}</div>
-            <div className="meta">{fmtDT(r.created_at)} · {label[r.source_type]}</div>
+            <div className="name">{r.name}</div>
+            <div className="meta">
+              {fmtDT(r.when)} · <span className={`hist-kind ${r.kind === '사용' ? 'use' : r.kind === '구매' ? 'buy' : ''}`}>{r.kind}</span>
+            </div>
           </div>
-          <span className={r.amount > 0 ? 'amt-plus' : 'amt-minus'}>
-            {r.amount > 0 ? '+' : ''}{r.amount}P
-          </span>
+          <span className={r.rightClass}>{r.right}</span>
         </div>
       ))}
       {rows.length === 0 && <p className="notice">아직 내역이 없어요</p>}

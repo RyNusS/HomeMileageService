@@ -8,8 +8,9 @@ html, body { height: 100%; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
   background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased;
+  overflow: hidden; /* 스크롤은 .content 내부에서만 — 당겨서 새로고침 위치 판정의 기준 */
 }
-#root { max-width: 480px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column; }
+#root { max-width: 480px; margin: 0 auto; height: 100dvh; display: flex; flex-direction: column; }
 
 .topbar { padding: calc(16px + env(safe-area-inset-top)) 20px 12px; display: flex; justify-content: space-between; align-items: center; }
 .topbar h1 { font-size: 18px; }
@@ -20,13 +21,16 @@ body {
   background: #fff8e8; border: 1px solid #f0e0b8; border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; }
 .push-banner .txt { font-size: 13px; color: #7a5b12; }
 
-.content { flex: 1; padding: 0 16px 90px; overflow-y: auto; }
+.content { flex: 1; min-height: 0; padding: 0 16px 90px; overflow-y: auto; overscroll-behavior-y: contain; }
 
 .ptr { display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }
 .ptr-ico { font-size: 22px; color: var(--sub); padding-bottom: 8px; transition: transform .2s, color .2s; }
 .ptr-ico.ready { color: var(--blue); transform: rotate(180deg); }
 .ptr-ico.spin { color: var(--blue); animation: ptr-rot .8s linear infinite; }
 @keyframes ptr-rot { to { transform: rotate(360deg); } }
+
+.hist-kind.buy { color: var(--amber); font-weight: 600; }
+.hist-kind.use { color: var(--blue); font-weight: 600; }
 
 .balance-card {
   background: linear-gradient(135deg, var(--blue), #7c5cf7);

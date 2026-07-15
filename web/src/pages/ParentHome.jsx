@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { api, getToken, t } from '../api.js';
 import { toast } from '../toast.jsx';
 import SettingsModal from '../settings.jsx';
 import { getSubscriptionState, enablePush } from '../pushClient.js';
+import usePullToRefresh from '../pullToRefresh.js';
 
 const fmtDT = (s) => new Date(s).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
@@ -41,6 +42,8 @@ export default function ParentHome({ me, refreshMe, logout }) {
   const [tab, setTab] = useState('approve');
   const [showSettings, setShowSettings] = useState(false);
   const [pushState, setPushState] = useState('unknown');
+  const contentRef = useRef(null);
+  const { ptr, refreshing, handlers } = usePullToRefresh(contentRef); // 당겨서 새로고침
 
   useEffect(() => { getSubscriptionState().then(setPushState).catch(() => {}); }, []);
 
@@ -68,7 +71,10 @@ export default function ParentHome({ me, refreshMe, logout }) {
           <button onClick={logout}>로그아웃</button>
         </div>
       </div>
-      <div className="content">
+      <div className="content" ref={contentRef} {...handlers}>
+        <div className="ptr" style={{ height: ptr }}>
+          <span className={`ptr-ico ${refreshing.current ? 'spin' : (ptr >= 60 ? 'ready' : '')}`}>↻</span>
+        </div>
         {tab === 'approve' && pushState === 'ready' && (
           <div className="push-banner">
             <div className="txt">🔔 적립 청구·사용권 사용 알림을 푸시로 받아보세요</div>
