@@ -140,3 +140,6 @@ label.fld { display: block; font-size: 13px; color: var(--sub); margin: 10px 0 6
 .modal-bg.photo { align-items: center; padding: 20px; }
 .proof-full { max-width: 92vw; max-height: 85vh; border-radius: 12px;
   box-shadow: 0 12px 40px rgba(0,0,0,.4); }
+
+.pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 4px 0 16px; }
+.pager span { font-size: 13px; color: var(--sub); font-weight: 600; }

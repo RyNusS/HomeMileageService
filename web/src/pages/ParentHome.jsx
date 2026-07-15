@@ -6,6 +6,8 @@ import { getSubscriptionState, enablePush } from '../pushClient.js';
 import usePullToRefresh from '../pullToRefresh.js';
 
 const fmtDT = (s) => new Date(s).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+// 1년치 내역은 연도까지 표시
+const fmtDTY = (s) => new Date(s).toLocaleString('ko-KR', { year: '2-digit', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 // auth-protected proof photo: thumbnail + tap to enlarge
 function ProofThumb({ path }) {
@@ -84,12 +86,13 @@ export default function ParentHome({ me, refreshMe, logout }) {
         {tab === 'approve' && <ApproveTab />}
         {tab === 'family' && <FamilyTab />}
         {tab === 'catalog' && <CatalogTab />}
+        {tab === 'history' && <HistoryTab scrollRef={contentRef} />}
         {tab === 'payout' && <PayoutTab />}
       </div>
       {showSettings && <SettingsModal me={me} refreshMe={refreshMe} onClose={() => setShowSettings(false)} />}
       <nav className="tabbar">
         {[['approve', '✅', '승인'], ['family', '👨‍👩‍👧', '가족'],
-          ['catalog', '🏷️', '항목관리'], ['payout', '💰', '정산']].map(([k, ico, label]) => (
+          ['catalog', '🏷️', '항목관리'], ['history', '📋', '내역'], ['payout', '💰', '정산']].map(([k, ico, label]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
             <span className="ico">{ico}</span>{label}
           </button>
@@ -170,6 +173,58 @@ function ApproveTab() {
         ))}
         {recent.length === 0 && <p className="notice">처리 내역이 없어요</p>}
       </div>
+    </>
+  );
+}
+
+function HistoryTab({ scrollRef }) {
+  const [data, setData] = useState({ rows: [], has_more: false });
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 100;
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setData(await api('GET', `/api/history/family?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}`));
+        if (scrollRef && scrollRef.current) scrollRef.current.scrollTop = 0;
+      } catch (ex) { toast(t(ex.message), 'error'); }
+    })();
+  }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const label = { earn: '적립', spend: '구매', adjust: '보정', use: '사용' };
+  const kindClass = { spend: 'buy', use: 'use' };
+
+  return (
+    <>
+      <div className="card">
+        <h3>가족 내역</h3>
+        <p className="notice">최근 1년의 내역이 표시돼요 (100개씩)</p>
+        {data.rows.map((r) => (
+          <div className="row" key={r.key}>
+            <div className="main">
+              <div className="name">
+                {r.kind === 'voucher_use'
+                  ? `${r.user_name} · 🎟️ ${r.label} 사용`
+                  : `${r.user_name} · ${r.memo || label[r.source_type]}`}
+              </div>
+              <div className="meta">
+                {fmtDTY(r.at)} · <span className={`hist-kind ${kindClass[r.source_type] || ''}`}>{label[r.source_type]}</span>
+              </div>
+            </div>
+            {r.kind === 'voucher_use'
+              ? <span className="amt-minus">{r.used_minutes}분/{r.total_minutes}분</span>
+              : <span className={r.amount > 0 ? 'amt-plus' : 'amt-minus'}>{r.amount > 0 ? '+' : ''}{r.amount}P</span>}
+          </div>
+        ))}
+        {data.rows.length === 0 && <p className="notice">내역이 없어요</p>}
+      </div>
+      {(page > 0 || data.has_more) && (
+        <div className="pager">
+          <button className="small ghost" disabled={page === 0} onClick={() => setPage(page - 1)}>‹ 이전</button>
+          <span>{page + 1}페이지</span>
+          <button className="small ghost" disabled={!data.has_more} onClick={() => setPage(page + 1)}>다음 ›</button>
+        </div>
+      )}
     </>
   );
 }
