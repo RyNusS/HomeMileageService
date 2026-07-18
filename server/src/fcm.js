@@ -60,7 +60,6 @@ export async function fcmToUser(userId, payload, log) {
           channelId: 'hms_default',
           icon: 'ic_stat_hms',
           color: '#4f7cf7',
-          clickAction: 'FCM_PLUGIN_ACTIVITY',
         },
       },
     });
