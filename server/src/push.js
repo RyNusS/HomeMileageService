@@ -1,6 +1,7 @@
 // Web Push (VAPID) - keys stored in DB config, subscriptions per user
 import webpush from 'web-push';
 import { q } from './db.js';
+import { fcmToUser } from './fcm.js';
 
 let ready = false;
 let initing = null;
@@ -61,6 +62,7 @@ export async function pushToParents(familyId, payload, log) {
 
 // fire-and-forget push to all subscriptions of a user
 export async function pushToUser(userId, payload, log) {
+  fcmToUser(userId, payload, log);   // native app (FCM), fire-and-forget
   if (!ready && !(await ensurePush(log))) return;
   try {
     const { rows } = await q(

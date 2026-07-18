@@ -1,6 +1,6 @@
 {
   "name": "hms-app",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "홈 마일리지 안드로이드 앱 셸",
   "scripts": {
@@ -10,6 +10,7 @@
   "dependencies": {
     "@capacitor/android": "^7.0.0",
     "@capacitor/core": "^7.0.0",
+    "@capacitor/push-notifications": "^7.0.0",
     "@capacitor/splash-screen": "^7.0.0"
   },
   "devDependencies": {

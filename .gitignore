@@ -6,6 +6,8 @@
 *.pem
 credentials*
 secrets*
+google-services.json
+fcm-service-account*.json
 
 # ── Node / Vite / 빌드 ──────────────────────
 node_modules/

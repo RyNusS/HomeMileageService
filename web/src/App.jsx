@@ -5,6 +5,7 @@ import ChildHome from './pages/ChildHome.jsx';
 import ParentHome from './pages/ParentHome.jsx';
 import AdminHome from './pages/AdminHome.jsx';
 import { ToastHost } from './toast.jsx';
+import { initNativePush } from './pushClient.js';
 
 export default function App() {
   const [me, setMe] = useState(null);
@@ -22,6 +23,7 @@ export default function App() {
   }, []);
 
   useEffect(() => { refreshMe(); }, [refreshMe]);
+  useEffect(() => { if (me) initNativePush(); }, [me]);
 
   const logout = () => { setToken(null); setMe(null); };
 

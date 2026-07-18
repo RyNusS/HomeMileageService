@@ -32,4 +32,26 @@ export async function pushRoutes(app) {
     }
     return { ok: true };
   });
+
+  // ── FCM (native app) device token ──
+  app.post('/push/fcm-token', { onRequest: app.authRequired }, async (req, reply) => {
+    const token = req.body && req.body.token;
+    if (!token || typeof token !== 'string' || token.length > 4096) {
+      return reply.code(400).send({ error: 'bad_token' });
+    }
+    await q(
+      `INSERT INTO fcm_token (user_id, token) VALUES ($1, $2)
+       ON CONFLICT (token) DO UPDATE SET user_id = $1, updated_at = now()`,
+      [req.user.sub, token]);
+    return { ok: true };
+  });
+
+  app.post('/push/fcm-token/remove', { onRequest: app.authRequired }, async (req) => {
+    const token = req.body && req.body.token;
+    if (token) {
+      await q('DELETE FROM fcm_token WHERE token = $1 AND user_id = $2',
+        [token, req.user.sub]);
+    }
+    return { ok: true };
+  });
 }

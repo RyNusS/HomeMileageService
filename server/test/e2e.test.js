@@ -50,14 +50,12 @@ async function main() {
   // migrate + seed (same process, dynamic import after env set)
   const { pool } = await import('../src/db.js');
   const fs = await import('node:fs');
-  const sql = fs.readFileSync(new URL('../migrations/001_phase1.sql', import.meta.url), 'utf8');
-  await pool.query(sql);
-  const sql2 = fs.readFileSync(new URL('../migrations/002_admin.sql', import.meta.url), 'utf8');
-  await pool.query(sql2);
-  const sql3 = fs.readFileSync(new URL('../migrations/003_push.sql', import.meta.url), 'utf8');
-  await pool.query(sql3);
-  const sql4 = fs.readFileSync(new URL('../migrations/004_study_earn.sql', import.meta.url), 'utf8');
-  await pool.query(sql4);
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const migDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
+  for (const f of fs.readdirSync(migDir).filter((x) => x.endsWith('.sql')).sort()) {
+    await pool.query(fs.readFileSync(path.join(migDir, f), 'utf8'));
+  }
   const { initPush } = await import('../src/push.js');
   await initPush();
 
@@ -240,6 +238,12 @@ async function main() {
   }, tokens.child, 200);
   await api('POST', '/api/push/subscribe', { endpoint: 'x' }, tokens.child, 400);
   await api('POST', '/api/push/unsubscribe', { endpoint: 'https://push.example/ep1' }, tokens.child, 200);
+
+  // --- v1.13.0: FCM device token register/remove
+  await api('POST', '/api/push/fcm-token', { token: 'test-fcm-token-1' }, tokens.child, 200);
+  await api('POST', '/api/push/fcm-token', { token: 'test-fcm-token-1' }, tokens.parent, 200); // re-assign ok
+  await api('POST', '/api/push/fcm-token', {}, tokens.child, 400);
+  await api('POST', '/api/push/fcm-token/remove', { token: 'test-fcm-token-1' }, tokens.parent, 200);
 
   // --- v1.3.0: telegram webhook inline approval
   await pool.query(

@@ -1,6 +1,7 @@
 // Account settings modal: change display name + password/PIN
 import React, { useState } from 'react';
 import { api, t } from './api.js';
+import { isNativeApp, openNotificationSoundSettings } from './pushClient.js';
 import { toast } from './toast.jsx';
 
 export default function SettingsModal({ me, refreshMe, onClose }) {
@@ -18,6 +19,11 @@ export default function SettingsModal({ me, refreshMe, onClose }) {
       await refreshMe();
     } catch (ex) { toast(t(ex.message), 'error'); }
     setBusy(false);
+  };
+
+  const openSound = async () => {
+    try { await openNotificationSoundSettings(); }
+    catch { toast('앱을 최신 버전으로 업데이트하면 사용할 수 있어요', 'error'); }
   };
 
   const savePw = async () => {
@@ -56,6 +62,13 @@ export default function SettingsModal({ me, refreshMe, onClose }) {
         <button className="small" disabled={busy || !oldPw || !newPw} onClick={savePw}>
           {me.role === 'child' ? 'PIN 변경' : '비밀번호 변경'}
         </button>
+        {isNativeApp() && (<>
+          <label className="fld" style={{ marginTop: 18 }}>알림</label>
+          <button className="small" onClick={openSound}>🔔 알림음·진동 설정</button>
+          <div style={{ fontSize: 12, color: '#889', marginTop: 6 }}>
+            휴대폰의 알림 설정에서 소리와 진동을 고를 수 있어요
+          </div>
+        </>)}
       </div>
     </div>
   );

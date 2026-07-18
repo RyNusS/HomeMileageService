@@ -31,6 +31,7 @@ services:
       - "3000"
     volumes:
       - hms_uploads:/data/uploads
+      - ./secrets:/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy
