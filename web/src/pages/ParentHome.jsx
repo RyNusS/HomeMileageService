@@ -207,6 +207,7 @@ function HistoryTab({ scrollRef }) {
                   ? `${r.user_name} · 🎟️ ${r.label} 사용`
                   : `${r.user_name} · ${r.memo || label[r.source_type]}`}
               </div>
+              {r.note ? <div className="meta" style={{ marginTop: 2 }}>💬 &ldquo;{r.note}&rdquo;</div> : null}
               <div className="meta">
                 {fmtDTY(r.at)} · <span className={`hist-kind ${kindClass[r.source_type] || ''}`}>{label[r.source_type]}</span>
               </div>

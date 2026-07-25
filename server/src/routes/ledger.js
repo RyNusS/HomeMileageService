@@ -31,17 +31,18 @@ export async function ledgerRoutes(app) {
                 'l' || l.id::text AS key,
                 l.created_at AS at,
                 u.name AS user_name,
-                l.amount, l.source_type, l.memo,
+                l.amount, l.source_type, l.memo, er.comment AS note,
                 NULL::text AS label, NULL::int AS used_minutes, NULL::int AS total_minutes
          FROM ledger_entry l
          JOIN app_user u ON u.id = l.user_id
+         LEFT JOIN earn_request er ON l.source_type = 'earn' AND er.id = l.source_id
          WHERE l.family_id = $1 AND l.created_at >= now() - interval '1 year'
          UNION ALL
          SELECT 'voucher_use',
                 'u' || d.voucher_id::text || ':' || d.used_date::text,
                 d.first_used_at,
                 u.name,
-                NULL, 'use', NULL,
+                NULL, 'use', NULL, NULL,
                 v.label, d.used_minutes, v.total_minutes
          FROM (
            SELECT vu.voucher_id,
