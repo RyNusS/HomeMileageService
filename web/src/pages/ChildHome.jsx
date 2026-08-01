@@ -4,6 +4,7 @@ import { toast } from '../toast.jsx';
 import SettingsModal from '../settings.jsx';
 import { getSubscriptionState, enablePush } from '../pushClient.js';
 import usePullToRefresh from '../pullToRefresh.js';
+import { NoticeSection } from './Notices.jsx';
 
 const fmtDT = (s) => new Date(s).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
@@ -116,6 +117,7 @@ function HomeTab({ me, vouchers, refreshAll, tick }) {
         <div className="value">{me.balance.toLocaleString()} P</div>
         <div className="sub">🎟️ 보유 사용권 {vouchers.remaining_minutes}분</div>
       </div>
+      <NoticeSection me={me} tick={tick} />
       <div className="card">
         <h3>최근 적립 청구</h3>
         {reqs.slice(0, 7).map((r) => (

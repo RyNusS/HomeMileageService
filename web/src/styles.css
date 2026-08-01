@@ -143,3 +143,34 @@ label.fld { display: block; font-size: 13px; color: var(--sub); margin: 10px 0 6
 
 .pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 4px 0 16px; }
 .pager span { font-size: 13px; color: var(--sub); font-weight: 600; }
+
+/* ── 공지사항 ── */
+.notice-head { display: flex; justify-content: space-between; align-items: center; }
+.notice-head .linklike { background: none; border: none; color: var(--sub); font-size: 13px; cursor: pointer; padding: 0; }
+.row.tappable { cursor: pointer; }
+.row .chev { color: var(--sub); font-size: 18px; flex: 0 0 auto; }
+.notice-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.notice-line .nt-title { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notice-line .nt-author { font-size: 12px; color: var(--sub); flex: 0 0 auto; }
+
+.page-overlay {
+  position: fixed; inset: 0; z-index: 40; background: var(--bg);
+  max-width: 480px; margin: 0 auto; display: flex; flex-direction: column;
+}
+.page-head { padding: calc(14px + env(safe-area-inset-top)) 12px 10px; display: flex; align-items: center; gap: 6px; }
+.page-head .back { background: none; border: none; font-size: 26px; line-height: 1; color: var(--text); cursor: pointer; padding: 0 8px; }
+.page-head h2 { font-size: 17px; flex: 1; }
+.page-head .right { flex: 0 0 auto; }
+.page-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 16px calc(30px + env(safe-area-inset-bottom)); }
+
+.nt-detail-title { font-size: 18px; font-weight: 700; }
+.nt-hr { border: none; border-top: 1px solid var(--line); margin: 12px 0; }
+.nt-content { font-size: 15px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.notice-img { width: 100%; border-radius: 12px; margin-top: 10px; border: 1px solid var(--line); cursor: zoom-in; display: block; }
+.nt-thumbs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.nt-thumb { position: relative; }
+.nt-thumb img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); display: block; }
+.nt-thumb button {
+  position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%;
+  border: none; background: #232a3d; color: #fff; font-size: 11px; cursor: pointer; line-height: 1;
+}

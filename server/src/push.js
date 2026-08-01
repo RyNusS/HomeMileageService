@@ -60,6 +60,19 @@ export async function pushToParents(familyId, payload, log) {
   }
 }
 
+// fire-and-forget push to every active member of a family (작성자 제외 가능 - 공지 알림용)
+export async function pushToFamily(familyId, payload, log, exceptUserId) {
+  try {
+    const { rows } = await q(
+      `SELECT id FROM app_user WHERE family_id = $1 AND active`, [familyId]);
+    await Promise.all(rows
+      .filter((r) => Number(r.id) !== Number(exceptUserId))
+      .map((r) => pushToUser(r.id, payload, log)));
+  } catch (err) {
+    if (log) log.warn({ err: err.message }, 'family push error');
+  }
+}
+
 // fire-and-forget push to all subscriptions of a user
 export async function pushToUser(userId, payload, log) {
   fcmToUser(userId, payload, log);   // native app (FCM), fire-and-forget

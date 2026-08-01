@@ -60,6 +60,7 @@ export async function userRoutes(app) {
   });
 
   // manual adjust (bonus / correction) - ledger immutable, so adjust entry
+  // 잔액이 마이너스가 되어도 허용한다 (부모 차감은 제한 없음, v1.15.0)
   app.post('/users/:id/adjust', { onRequest: app.parentOnly }, async (req, reply) => {
     const amount = Number(req.body && req.body.amount);
     const memo = (req.body && req.body.memo) || '';
@@ -71,7 +72,6 @@ export async function userRoutes(app) {
          WHERE id = $1 AND family_id = $2 FOR UPDATE`,
         [req.params.id, req.user.family_id]);
       if (!rows[0]) return null;
-      if (rows[0].balance_cache + amount < 0) return { error: 'insufficient_balance' };
       await c.query(
         `INSERT INTO ledger_entry (family_id, user_id, amount, source_type, memo)
          VALUES ($1, $2, $3, 'adjust', $4)`,

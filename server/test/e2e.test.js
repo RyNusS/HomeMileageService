@@ -317,6 +317,42 @@ async function main() {
     assert.equal(c2.used, 1);
   }
 
+  // --- v1.15.0: 부모 차감은 잔액이 마이너스가 되어도 허용
+  {
+    const meB = await api('GET', '/api/me', null, tokens.child, 200);
+    const adj = await api('POST', `/api/users/${childId}/adjust`,
+      { amount: -(meB.balance + 100), memo: '패널티' }, tokens.parent, 200);
+    assert.equal(adj.balance, -100);
+    const meN = await api('GET', '/api/me', null, tokens.child, 200);
+    assert.equal(meN.balance, -100);
+    // 상점 구매는 여전히 잔액 부족이면 차단
+    await api('POST', '/api/orders', { catalog_id: s1.id, qty: 1 }, tokens.child, 400);
+    await api('POST', `/api/users/${childId}/adjust`, { amount: 100, memo: '복구' }, tokens.parent, 200);
+  }
+
+  // --- v1.15.0: 공지사항 (모든 계정 작성, 최신/목록 페이징, 상세, 삭제 권한)
+  {
+    const n1 = await api('POST', '/api/notices', { title: '부모 공지', content: '내용1' }, tokens.parent, 200);
+    const n2 = await api('POST', '/api/notices', { title: '아이 공지', content: '내용2' }, tokens.child, 200);
+    await api('POST', '/api/notices', { title: '   ' }, tokens.child, 400);
+    const latest = await api('GET', '/api/notices/latest', null, tokens.child, 200);
+    assert.equal(latest.notice.id, n2.id);
+    assert.ok(latest.notice.user_name);
+    const list = await api('GET', '/api/notices?limit=1&offset=0', null, tokens.parent, 200);
+    assert.equal(list.rows.length, 1);
+    assert.equal(list.has_more, true);
+    const det = await api('GET', `/api/notices/${n1.id}`, null, tokens.child, 200);
+    assert.equal(det.title, '부모 공지');
+    assert.ok(Array.isArray(det.images));
+    // 자녀는 남(부모) 공지 삭제 불가 / 본인 공지는 삭제 가능 / 부모는 누구 공지든 삭제 가능
+    await api('DELETE', `/api/notices/${n1.id}`, null, tokens.child, 403);
+    await api('DELETE', `/api/notices/${n2.id}`, null, tokens.child, 200);
+    await api('DELETE', `/api/notices/${n1.id}`, null, tokens.parent, 200);
+    await api('DELETE', `/api/notices/${n1.id}`, null, tokens.parent, 404);
+    const empty = await api('GET', '/api/notices/latest', null, tokens.parent, 200);
+    assert.equal(empty.notice, null);
+  }
+
   console.log('ALL E2E TESTS PASSED');
 }
 

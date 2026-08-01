@@ -43,9 +43,12 @@ export async function adminRoutes(app) {
       await c.query('DELETE FROM spend_order WHERE family_id = $1', [fid]);
       await c.query('DELETE FROM earn_request WHERE family_id = $1', [fid]);
       await c.query('DELETE FROM ledger_entry WHERE family_id = $1', [fid]);
+      await c.query('DELETE FROM notice WHERE family_id = $1', [fid]);
       await c.query('DELETE FROM spend_catalog WHERE family_id = $1', [fid]);
       await c.query('DELETE FROM earn_catalog WHERE family_id = $1', [fid]);
       await c.query('DELETE FROM telegram_link WHERE family_id = $1', [fid]);
+      await c.query('DELETE FROM push_subscription WHERE user_id IN (SELECT id FROM app_user WHERE family_id = $1)', [fid]);
+      await c.query('DELETE FROM fcm_token WHERE user_id IN (SELECT id FROM app_user WHERE family_id = $1)', [fid]);
       await c.query('DELETE FROM app_user WHERE family_id = $1', [fid]);
       await c.query('DELETE FROM family WHERE id = $1', [fid]);
       return true;
@@ -135,7 +138,9 @@ export async function adminRoutes(app) {
       await c.query('DELETE FROM spend_order WHERE user_id = $1', [uid]);
       await c.query('DELETE FROM earn_request WHERE user_id = $1', [uid]);
       await c.query('DELETE FROM ledger_entry WHERE user_id = $1', [uid]);
+      await c.query('DELETE FROM notice WHERE user_id = $1', [uid]);
       await c.query('DELETE FROM push_subscription WHERE user_id = $1', [uid]);
+      await c.query('DELETE FROM fcm_token WHERE user_id = $1', [uid]);
       await c.query('DELETE FROM telegram_link WHERE parent_user_id = $1', [uid]);
       await c.query('DELETE FROM app_user WHERE id = $1', [uid]);
       return true;

@@ -4,6 +4,7 @@ import { toast } from '../toast.jsx';
 import SettingsModal from '../settings.jsx';
 import { getSubscriptionState, enablePush } from '../pushClient.js';
 import usePullToRefresh from '../pullToRefresh.js';
+import { NoticeSection } from './Notices.jsx';
 
 const fmtDT = (s) => new Date(s).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 // 1년치 내역은 연도까지 표시
@@ -83,7 +84,7 @@ export default function ParentHome({ me, refreshMe, logout }) {
             <button className="small" onClick={turnOnPush}>알림 켜기</button>
           </div>
         )}
-        {tab === 'approve' && <ApproveTab />}
+        {tab === 'approve' && <ApproveTab me={me} />}
         {tab === 'family' && <FamilyTab />}
         {tab === 'catalog' && <CatalogTab />}
         {tab === 'history' && <HistoryTab scrollRef={contentRef} />}
@@ -102,7 +103,7 @@ export default function ParentHome({ me, refreshMe, logout }) {
   );
 }
 
-function ApproveTab() {
+function ApproveTab({ me }) {
   const [pending, setPending] = useState([]);
   const [recent, setRecent] = useState([]);
 
@@ -160,6 +161,7 @@ function ApproveTab() {
         ))}
         {pending.length === 0 && <p className="notice">대기 중인 청구가 없어요</p>}
       </div>
+      <NoticeSection me={me} />
       <div className="section-title">최근 처리 (승인/거절·지급/차감)</div>
       <div className="card">
         {recent.map((r) => (

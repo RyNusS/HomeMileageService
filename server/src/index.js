@@ -18,6 +18,7 @@ import { catalogRoutes } from './routes/catalog.js';
 import { earnRoutes } from './routes/earn.js';
 import { spendRoutes } from './routes/spend.js';
 import { ledgerRoutes } from './routes/ledger.js';
+import { noticeRoutes } from './routes/notice.js';
 import { adminRoutes } from './routes/admin.js';
 import { pushRoutes } from './routes/push.js';
 import { telegramRoutes } from './routes/telegram.js';
@@ -36,7 +37,7 @@ export function buildApp() {
     throw new Error('JWT_SECRET env is required');
   }
   app.register(jwt, { secret: process.env.JWT_SECRET, sign: { expiresIn: '30d' } });
-  app.register(multipart, { limits: { fileSize: 8 * 1024 * 1024, files: 1 } });
+  app.register(multipart, { limits: { fileSize: 8 * 1024 * 1024, files: 5 } });
 
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -95,6 +96,7 @@ export function buildApp() {
   app.register(earnRoutes, { prefix: '/api', uploadDir: UPLOAD_DIR });
   app.register(spendRoutes, { prefix: '/api' });
   app.register(ledgerRoutes, { prefix: '/api' });
+  app.register(noticeRoutes, { prefix: '/api', uploadDir: UPLOAD_DIR });
   app.register(adminRoutes, { prefix: '/api' });
   app.register(pushRoutes, { prefix: '/api' });
   app.register(telegramRoutes, { prefix: '/api' });
