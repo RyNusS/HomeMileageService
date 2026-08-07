@@ -49,3 +49,15 @@ export function earnRequestKeyboard(requestId) {
   }
   return { inline_keyboard: rows };
 }
+
+// inline keyboard for a voucher use request (휴대폰/게임기 사용 시작 승인)
+export function voucherUseKeyboard(requestId) {
+  const rows = [[
+    { text: '✅ 승인', callback_data: `vu_ok:${requestId}` },
+    { text: '❌ 거절', callback_data: `vu_no:${requestId}` },
+  ]];
+  if (process.env.PUBLIC_URL) {
+    rows.push([{ text: '🏠 앱에서 보기', url: process.env.PUBLIC_URL }]);
+  }
+  return { inline_keyboard: rows };
+}

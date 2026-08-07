@@ -1,6 +1,7 @@
 // family member management (parent) + balance adjust
 import { q, tx } from '../db.js';
 import { hashSecret } from '../hash.js';
+import { pushToUser } from '../push.js';
 
 export async function userRoutes(app) {
   // list family members with balances
@@ -83,6 +84,18 @@ export async function userRoutes(app) {
     });
     if (!result) return reply.code(404).send({ error: 'not_found' });
     if (result.error) return reply.code(400).send({ error: result.error });
+
+    // 부모가 지급/차감하면 해당 자녀에게도 알림 (v1.16.0)
+    pushToUser(req.params.id, amount > 0
+      ? {
+        title: '마일리지 지급 🎁',
+        body: `+${amount}P${memo ? ` · ${memo}` : ''} (잔액 ${result.balance.toLocaleString()}P)`,
+      }
+      : {
+        title: '마일리지 차감 ⚠️',
+        body: `${amount}P${memo ? ` · ${memo}` : ''} (잔액 ${result.balance.toLocaleString()}P)`,
+      }, req.log);
+
     return result;
   });
 }

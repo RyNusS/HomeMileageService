@@ -1,7 +1,8 @@
 // spend: buy (auto-deduct) -> vouchers (stock) or cash payout; consume vouchers FIFO
 import { q, tx } from '../db.js';
-import { notifyFamily } from '../telegram.js';
+import { notifyFamily, voucherUseKeyboard } from '../telegram.js';
 import { pushToUser, pushToParents } from '../push.js';
+import { decideVoucherUseRequest, listVoucherUseRequests } from '../voucherService.js';
 
 export async function spendRoutes(app) {
   // purchase
@@ -103,8 +104,10 @@ export async function spendRoutes(app) {
   app.get('/vouchers', { onRequest: app.authRequired }, async (req) => {
     const userId = req.user.role === 'child' ? req.user.sub : (req.query.user_id || req.user.sub);
     const { rows } = await q(
-      `SELECT v.id, v.label, v.total_minutes, v.remaining_minutes, v.status, v.created_at
+      `SELECT v.id, v.label, v.total_minutes, v.remaining_minutes, v.status, v.created_at,
+              COALESCE(sc.use_approval, TRUE) AS use_approval
        FROM voucher v
+       LEFT JOIN spend_catalog sc ON sc.id = v.catalog_id
        WHERE v.user_id = $1 AND v.family_id = $2
        ORDER BY v.status = 'active' DESC, v.id DESC LIMIT 200`,
       [userId, req.user.family_id]);
@@ -138,25 +141,57 @@ export async function spendRoutes(app) {
   });
 
   // use one voucher entirely (consume its remaining minutes)
+  // 상점 항목이 use_approval이면 바로 소진하지 않고 '사용 신청'을 만들어 부모 승인 대기로 보낸다.
+  // (휴대폰/게임기는 서버가 강제할 수 없어 부모가 패밀리링크 등에서 시간을 넣어준 뒤 승인)
   app.post('/vouchers/:id/use', { onRequest: app.authRequired }, async (req, reply) => {
     const result = await tx(async (c) => {
       const { rows } = await c.query(
-        `SELECT id, remaining_minutes FROM voucher
-         WHERE id = $1 AND user_id = $2 AND family_id = $3 AND status = 'active'
-         FOR UPDATE`,
+        `SELECT v.id, v.label, v.remaining_minutes,
+                COALESCE(sc.use_approval, TRUE) AS use_approval
+         FROM voucher v
+         LEFT JOIN spend_catalog sc ON sc.id = v.catalog_id
+         WHERE v.id = $1 AND v.user_id = $2 AND v.family_id = $3 AND v.status = 'active'
+         FOR UPDATE OF v`,
         [req.params.id, req.user.sub, req.user.family_id]);
       const v = rows[0];
       if (!v) return { code: 404, error: 'not_found' };
+
+      if (v.use_approval) {
+        const dup = await c.query(
+          `SELECT id FROM voucher_use_request WHERE voucher_id = $1 AND status = 'pending'`,
+          [v.id]);
+        if (dup.rows[0]) return { code: 409, error: 'already_requested' };
+        const ins = await c.query(
+          `INSERT INTO voucher_use_request (family_id, user_id, voucher_id, minutes)
+           VALUES ($1, $2, $3, $4) RETURNING id`,
+          [req.user.family_id, req.user.sub, v.id, v.remaining_minutes]);
+        return {
+          pending: true, requestId: Number(ins.rows[0].id),
+          used: v.remaining_minutes, label: v.label,
+        };
+      }
+
       await c.query(
         `UPDATE voucher SET remaining_minutes = 0, status = 'consumed' WHERE id = $1`, [v.id]);
       await c.query(
         `INSERT INTO voucher_usage (voucher_id, used_minutes) VALUES ($1, $2)`,
         [v.id, v.remaining_minutes]);
-      const lab = await c.query('SELECT label FROM voucher WHERE id = $1', [v.id]);
-      return { used: v.remaining_minutes, label: lab.rows[0].label };
+      return { used: v.remaining_minutes, label: v.label };
     });
     if (result.error) return reply.code(result.code).send(result);
+
     const who = await q('SELECT name FROM app_user WHERE id = $1', [req.user.sub]);
+    if (result.pending) {
+      notifyFamily(req.user.family_id,
+        `[HMS] 🎟️ ${who.rows[0].name} 사용권 사용 신청\n${result.label} ${result.used}분 — 시간을 넣어준 뒤 승인해 주세요`,
+        req.log, voucherUseKeyboard(result.requestId));
+      pushToParents(req.user.family_id, {
+        title: '사용권 사용 신청 🎟️',
+        body: `${who.rows[0].name} · ${result.label} ${result.used}분 — 시간을 넣어준 뒤 승인해 주세요`,
+      }, req.log);
+      return { pending: true, id: result.requestId, minutes: result.used };
+    }
+
     notifyFamily(req.user.family_id,
       `[HMS] 🎟️ ${who.rows[0].name} 사용권 사용\n${result.label} ${result.used}분 (지금부터)`,
       req.log);
@@ -166,6 +201,40 @@ export async function spendRoutes(app) {
     }, req.log);
     return { used: result.used };
   });
+
+  // 사용권 사용 신청 목록 (자녀: 본인 것, 부모: 가족 전체)
+  app.get('/voucher-requests', { onRequest: app.authRequired }, async (req) => (
+    listVoucherUseRequests({
+      familyId: req.user.family_id,
+      userId: req.user.role === 'child' ? req.user.sub : null,
+      status: req.query.status,
+    })
+  ));
+
+  // 자녀가 대기 중인 신청을 취소
+  app.delete('/voucher-requests/:id', { onRequest: app.authRequired }, async (req, reply) => {
+    const { rowCount } = await q(
+      `DELETE FROM voucher_use_request
+       WHERE id = $1 AND user_id = $2 AND family_id = $3 AND status = 'pending'`,
+      [req.params.id, req.user.sub, req.user.family_id]);
+    if (!rowCount) return reply.code(404).send({ error: 'not_found_or_decided' });
+    return { ok: true };
+  });
+
+  async function decideUse(req, reply, approve) {
+    const result = await decideVoucherUseRequest({
+      requestId: req.params.id,
+      familyId: req.user.family_id,
+      deciderId: req.user.sub,
+      approve,
+    }, req.log);
+    if (result.error) return reply.code(result.code).send({ error: result.error });
+    return { ok: true, minutes: result.used };
+  }
+  app.post('/voucher-requests/:id/approve', { onRequest: app.parentOnly },
+    (req, reply) => decideUse(req, reply, true));
+  app.post('/voucher-requests/:id/reject', { onRequest: app.parentOnly },
+    (req, reply) => decideUse(req, reply, false));
 
   // consume minutes FIFO across active vouchers (partial use / batch use)
   // 옵션(외부 세션 클라이언트용):

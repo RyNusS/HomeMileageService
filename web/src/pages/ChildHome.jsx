@@ -80,7 +80,7 @@ export default function ChildHome({ me, refreshMe, logout }) {
         {tab === 'home' && <HomeTab me={me} vouchers={vouchers} refreshAll={refreshAll} tick={tick} />}
         {tab === 'earn' && <EarnTab refreshAll={refreshAll} tick={tick} />}
         {tab === 'shop' && <ShopTab me={me} refreshAll={refreshAll} tick={tick} />}
-        {tab === 'voucher' && <VoucherTab vouchers={vouchers} refreshAll={refreshAll} />}
+        {tab === 'voucher' && <VoucherTab vouchers={vouchers} refreshAll={refreshAll} tick={tick} />}
         {tab === 'history' && <HistoryTab tick={tick} />}
       </div>
       {showSettings && <SettingsModal me={me} refreshMe={refreshMe} onClose={() => setShowSettings(false)} />}
@@ -323,20 +323,42 @@ function ShopTab({ me, refreshAll, tick }) {
   );
 }
 
-function VoucherTab({ vouchers, refreshAll }) {
+function VoucherTab({ vouchers, refreshAll, tick }) {
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState([]);   // 부모 승인 대기 중인 사용 신청
   const active = vouchers.vouchers.filter((v) => v.status === 'active');
   const past = vouchers.vouchers.filter((v) => v.status !== 'active');
 
+  const loadPending = useCallback(async () => {
+    try { setPending(await api('GET', '/api/voucher-requests?status=pending')); } catch { /* 목록은 부가정보 */ }
+  }, []);
+  useEffect(() => { loadPending(); }, [loadPending, tick, vouchers]);
+
+  const pendingOf = (v) => pending.find((p) => p.voucher_id === v.id);
+
   const useOne = async (v) => {
-    if (!window.confirm(`'${v.label}' (${v.remaining_minutes}분)을 지금 사용할까요?`)) return;
+    const needsApproval = v.use_approval !== false;
+    const msg = needsApproval
+      ? `'${v.label}' (${v.remaining_minutes}분) 사용을 부모님께 신청할까요?\n승인되면 그때부터 사용할 수 있어요.`
+      : `'${v.label}' (${v.remaining_minutes}분)을 지금 사용할까요?`;
+    if (!window.confirm(msg)) return;
     setBusy(true);
     try {
       const r = await api('POST', `/api/vouchers/${v.id}/use`);
-      toast(`${v.label} ${r.used}분 사용 완료!`);
-      await refreshAll();
+      if (r.pending) toast(`사용 신청 완료! 부모님 승인을 기다려 주세요 (${r.minutes}분)`);
+      else toast(`${v.label} ${r.used}분 사용 완료!`);
+      await refreshAll(); await loadPending();
     } catch (ex) { toast(t(ex.message), 'error'); }
     setBusy(false);
+  };
+
+  const cancelReq = async (p) => {
+    if (!window.confirm(`'${p.label}' 사용 신청을 취소할까요?`)) return;
+    try {
+      await api('DELETE', `/api/voucher-requests/${p.id}`);
+      toast('사용 신청을 취소했어요');
+      await refreshAll(); await loadPending();
+    } catch (ex) { toast(t(ex.message), 'error'); }
   };
 
   return (
@@ -348,17 +370,30 @@ function VoucherTab({ vouchers, refreshAll }) {
       </div>
       <div className="card">
         <h3>내 사용권</h3>
-        {active.map((v) => (
-          <div className="row" key={v.id}>
-            <div className="main">
-              <div className="name">{v.label}</div>
-              <div className="meta">{v.remaining_minutes}분 · {fmtDT(v.created_at)} 구매</div>
+        {active.map((v) => {
+          const p = pendingOf(v);
+          return (
+            <div className="row" key={v.id}>
+              <div className="main">
+                <div className="name">{v.label}</div>
+                <div className="meta">
+                  {v.remaining_minutes}분 · {fmtDT(v.created_at)} 구매
+                  {p ? ` · ${fmtDT(p.created_at)} 신청` : ''}
+                </div>
+              </div>
+              {p ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="pill pending">승인 대기</span>
+                  <button className="small danger" onClick={() => cancelReq(p)}>취소</button>
+                </div>
+              ) : (
+                <button className="small voucher-use-btn" disabled={busy} onClick={() => useOne(v)}>
+                  {v.use_approval !== false ? '사용 신청' : '사용하기'}
+                </button>
+              )}
             </div>
-            <button className="small voucher-use-btn" disabled={busy} onClick={() => useOne(v)}>
-              사용하기
-            </button>
-          </div>
-        ))}
+          );
+        })}
         {active.length === 0 && <p className="notice">보유 중인 사용권이 없어요. 상점에서 구매해요!</p>}
       </div>
       {past.length > 0 && (

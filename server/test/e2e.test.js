@@ -90,7 +90,8 @@ async function main() {
   const e1 = await api('POST', '/api/catalog/earn', { name: '숙제', points: 20 }, tokens.parent, 200);
   await api('POST', '/api/catalog/earn', { name: '일기', points: 10 }, tokens.parent, 200);
   const s1 = await api('POST', '/api/catalog/spend',
-    { name: '게임 30분권', kind: 'time_voucher', unit_minutes: 30, price_points: 80 }, tokens.parent, 200);
+    { name: '게임 30분권', kind: 'time_voucher', unit_minutes: 30, price_points: 80, use_approval: false },
+    tokens.parent, 200);
   const s2 = await api('POST', '/api/catalog/spend',
     { name: '용돈 1000원', kind: 'cash', price_points: 100 }, tokens.parent, 200);
   // child cannot create
@@ -351,6 +352,68 @@ async function main() {
     await api('DELETE', `/api/notices/${n1.id}`, null, tokens.parent, 404);
     const empty = await api('GET', '/api/notices/latest', null, tokens.parent, 200);
     assert.equal(empty.notice, null);
+  }
+
+  // --- v1.16.0: 사용권 사용 전 부모 승인 (휴대폰/게임기)
+  {
+    // 기본값은 '승인 필요' — 명시하지 않고 만든 항목은 use_approval = true
+    const s4 = await api('POST', '/api/catalog/spend',
+      { name: '휴대폰 20분권', kind: 'time_voucher', unit_minutes: 20, price_points: 10 },
+      tokens.parent, 200);
+    const cat = await api('GET', '/api/catalog/spend', null, tokens.parent, 200);
+    assert.equal(cat.find((c) => c.id === s4.id).use_approval, true);
+    assert.equal(cat.find((c) => c.id === s1.id).use_approval, false);
+
+    await api('POST', `/api/users/${childId}/adjust`, { amount: 1000, memo: '테스트 충전' }, tokens.parent, 200);
+    await api('POST', '/api/orders', { catalog_id: s4.id, qty: 2 }, tokens.child, 200);
+    const vs = await api('GET', '/api/vouchers', null, tokens.child, 200);
+    const mine = vs.vouchers.filter((x) => x.status === 'active' && x.label === '휴대폰 20분권');
+    assert.equal(mine.length, 2);
+    assert.equal(mine[0].use_approval, true);
+    const before = vs.remaining_minutes;
+
+    // 사용 신청: 즉시 차감되지 않고 승인 대기로 들어간다
+    const rq = await api('POST', `/api/vouchers/${mine[0].id}/use`, null, tokens.child, 200);
+    assert.equal(rq.pending, true);
+    assert.equal(rq.minutes, 20);
+    assert.equal((await api('GET', '/api/vouchers', null, tokens.child, 200)).remaining_minutes, before);
+    // 같은 사용권 중복 신청 차단
+    await api('POST', `/api/vouchers/${mine[0].id}/use`, null, tokens.child, 409);
+
+    // 부모 승인 목록에 보이고, 자녀는 취소할 수 있다
+    const vp = await api('GET', '/api/voucher-requests?status=pending', null, tokens.parent, 200);
+    assert.equal(vp.length, 1);
+    assert.equal(vp[0].label, '휴대폰 20분권');
+    assert.equal(vp[0].minutes, 20);
+    await api('DELETE', `/api/voucher-requests/${rq.id}`, null, tokens.child, 200);
+    assert.equal(
+      (await api('GET', '/api/voucher-requests?status=pending', null, tokens.parent, 200)).length, 0);
+
+    // 다시 신청 → 자녀는 승인 불가, 부모가 승인하면 그때 차감
+    const rq2 = await api('POST', `/api/vouchers/${mine[0].id}/use`, null, tokens.child, 200);
+    await api('POST', `/api/voucher-requests/${rq2.id}/approve`, null, tokens.child, 403);
+    const okd = await api('POST', `/api/voucher-requests/${rq2.id}/approve`, null, tokens.parent, 200);
+    assert.equal(okd.minutes, 20);
+    assert.equal(
+      (await api('GET', '/api/vouchers', null, tokens.child, 200)).remaining_minutes, before - 20);
+    await api('POST', `/api/voucher-requests/${rq2.id}/approve`, null, tokens.parent, 404);
+
+    // 거절하면 사용권은 그대로 남는다
+    const rq3 = await api('POST', `/api/vouchers/${mine[1].id}/use`, null, tokens.child, 200);
+    await api('POST', `/api/voucher-requests/${rq3.id}/reject`, null, tokens.parent, 200);
+    assert.equal(
+      (await api('GET', '/api/vouchers', null, tokens.child, 200)).remaining_minutes, before - 20);
+    const all = await api('GET', '/api/voucher-requests', null, tokens.parent, 200);
+    assert.equal(all.find((r) => r.id === rq3.id).status, 'rejected');
+    // 자녀는 본인 신청만 조회된다
+    assert.ok((await api('GET', '/api/voucher-requests', null, tokens.child, 200)).length >= 2);
+
+    // use_approval을 끄면(컴퓨터처럼 즉시 적용되는 항목) 신청 없이 바로 사용
+    await api('PATCH', `/api/catalog/spend/${s4.id}`, { use_approval: false }, tokens.parent, 200);
+    const nowUse = await api('POST', `/api/vouchers/${mine[1].id}/use`, null, tokens.child, 200);
+    assert.equal(nowUse.used, 20);
+    assert.equal(
+      (await api('GET', '/api/vouchers', null, tokens.child, 200)).remaining_minutes, before - 40);
   }
 
   console.log('ALL E2E TESTS PASSED');

@@ -105,10 +105,21 @@ export default function ParentHome({ me, refreshMe, logout }) {
 
 function ApproveTab({ me }) {
   const [pending, setPending] = useState([]);
+  const [vpending, setVpending] = useState([]);   // 사용권 사용 신청 (휴대폰/게임기)
   const [recent, setRecent] = useState([]);
 
   const load = useCallback(async () => {
     setPending(await api('GET', '/api/earn-requests?status=pending'));
+    const vreqs = await api('GET', '/api/voucher-requests');
+    setVpending(vreqs.filter((r) => r.status === 'pending'));
+    const vdecided = vreqs
+      .filter((r) => r.status !== 'pending')
+      .map((r) => ({
+        key: `v${r.id}`, when: r.decided_at || r.created_at,
+        title: `${r.user_name} · 🎟️ ${r.label} ${r.minutes}분 사용`,
+        pillClass: r.status === 'approved' ? 'approved' : 'rejected',
+        pillText: r.status === 'approved' ? '사용 승인' : '사용 거절',
+      }));
     const decided = (await api('GET', '/api/earn-requests'))
       .filter((r) => r.status !== 'pending')
       .map((r) => ({
@@ -124,7 +135,7 @@ function ApproveTab({ me }) {
         pillClass: l.amount > 0 ? 'approved' : 'rejected',
         pillText: l.amount > 0 ? `지급 +${l.amount}P` : `차감 ${l.amount}P`,
       }));
-    setRecent([...decided, ...adjusts]
+    setRecent([...decided, ...adjusts, ...vdecided]
       .sort((a, b) => new Date(b.when) - new Date(a.when))
       .slice(0, 15));
   }, []);
@@ -140,10 +151,37 @@ function ApproveTab({ me }) {
     } catch (ex) { toast(t(ex.message), 'error'); }
   };
 
+  // 사용권 사용 신청: 승인하면 그때 사용권이 차감되고 자녀에게 알림이 간다
+  const decideUse = async (r, action) => {
+    if (action === 'approve'
+        && !window.confirm(`${r.user_name}의 '${r.label}' ${r.minutes}분 사용을 승인할까요?\n기기에 시간을 넣어준 뒤 승인해 주세요.`)) return;
+    try {
+      await api('POST', `/api/voucher-requests/${r.id}/${action}`);
+      toast(action === 'approve'
+        ? `${r.user_name} · ${r.label} ${r.minutes}분 사용 승인 완료`
+        : `${r.user_name} · ${r.label} 사용 신청을 거절했어요`);
+      await load();
+    } catch (ex) { toast(t(ex.message), 'error'); }
+  };
+
   return (
     <>
-      <div className="section-title">승인 대기 {pending.length}건</div>
+      <div className="section-title">승인 대기 {pending.length + vpending.length}건</div>
       <div className="card">
+        {vpending.map((r) => (
+          <div className="row" key={`v${r.id}`}>
+            <div className="main">
+              <div className="name">{r.user_name} · 🎟️ {r.label} {r.minutes}분 사용</div>
+              <div className="meta">
+                {fmtDT(r.created_at)} · 기기에 시간을 넣어준 뒤 승인
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className="small" onClick={() => decideUse(r, 'approve')}>승인</button>
+              <button className="small danger" onClick={() => decideUse(r, 'reject')}>거절</button>
+            </div>
+          </div>
+        ))}
         {pending.map((r) => (
           <div className="row" key={r.id}>
             <div className="main">
@@ -159,7 +197,7 @@ function ApproveTab({ me }) {
             </div>
           </div>
         ))}
-        {pending.length === 0 && <p className="notice">대기 중인 청구가 없어요</p>}
+        {pending.length + vpending.length === 0 && <p className="notice">대기 중인 청구가 없어요</p>}
       </div>
       <NoticeSection me={me} />
       <div className="section-title">최근 처리 (승인/거절·지급/차감)</div>
@@ -361,6 +399,7 @@ function CatalogTab() {
         const body = {
           name: f.name, kind: f.kind, price_points: Number(f.price_points),
           unit_minutes: f.kind === 'time_voucher' ? Number(f.unit_minutes) : undefined,
+          use_approval: f.kind === 'time_voucher' ? f.use_approval !== false : undefined,
         };
         if (mode.item) await api('PATCH', `/api/catalog/spend/${mode.item.id}`, body);
         else await api('POST', '/api/catalog/spend', body);
@@ -453,7 +492,11 @@ function CatalogTab() {
               <div className="name" style={{ opacity: it.active ? 1 : 0.4 }}>
                 {it.kind === 'cash' ? '💰' : '🎟️'} {it.name}
               </div>
-              <div className="meta">{it.price_points}P{it.unit_minutes ? ` · ${it.unit_minutes}분` : ''}{it.active ? '' : ' · 숨김'}</div>
+              <div className="meta">
+                {it.price_points}P{it.unit_minutes ? ` · ${it.unit_minutes}분` : ''}
+                {it.kind === 'time_voucher' ? (it.use_approval === false ? ' · 즉시 사용' : ' · 승인 필요') : ''}
+                {it.active ? '' : ' · 숨김'}
+              </div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
               <button className="small ghost" onClick={() => { setMode({ cat: 'spend', item: it }); setF({ ...it }); }}>수정</button>
@@ -497,6 +540,14 @@ function CatalogTab() {
               {f.kind !== 'cash' && (<>
                 <label className="fld">1개당 시간(분)</label>
                 <input inputMode="numeric" value={f.unit_minutes || ''} onChange={(e) => setF({ ...f, unit_minutes: e.target.value })} />
+                <label className="fld" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" style={{ width: 'auto' }} checked={f.use_approval !== false}
+                    onChange={(e) => setF({ ...f, use_approval: e.target.checked })} /> 사용 시 부모 승인 필요
+                </label>
+                <p className="notice" style={{ marginTop: -2 }}>
+                  휴대폰·게임기처럼 부모가 직접 시간을 넣어줘야 하는 항목은 켜 두세요.
+                  컴퓨터처럼 바로 적용되는 항목은 꺼 두면 신청 없이 즉시 사용돼요.
+                </p>
               </>)}
               <label className="fld">가격 (포인트)</label>
               <input inputMode="numeric" value={f.price_points || ''} onChange={(e) => setF({ ...f, price_points: e.target.value })} />

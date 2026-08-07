@@ -3,6 +3,7 @@
 import { q } from '../db.js';
 import { tgCall } from '../telegram.js';
 import { decideEarnRequest } from '../earnService.js';
+import { decideVoucherUseRequest } from '../voucherService.js';
 
 export async function telegramRoutes(app) {
   const SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || '';
@@ -104,13 +105,15 @@ export async function telegramRoutes(app) {
       return { ok: true };
     }
 
-    const m = /^er_(ok|no):(\d+)$/.exec(cb.data);
+    // er_* = 적립 청구, vu_* = 사용권 사용 신청
+    const m = /^(er|vu)_(ok|no):(\d+)$/.exec(cb.data);
     if (!m) {
       await tgCall('answerCallbackQuery', { callback_query_id: cb.id }, req.log);
       return { ok: true };
     }
-    const approve = m[1] === 'ok';
-    const requestId = Number(m[2]);
+    const isVoucher = m[1] === 'vu';
+    const approve = m[2] === 'ok';
+    const requestId = Number(m[3]);
     const chatId = cb.message && cb.message.chat && cb.message.chat.id;
 
     // the chat must be a registered parent chat; use its family + parent for the decision
@@ -129,14 +132,18 @@ export async function telegramRoutes(app) {
       return { ok: true };
     }
 
-    const result = await decideEarnRequest({
+    const decideArgs = {
       requestId, familyId: link.family_id, deciderId: link.decider_id, approve,
-    }, req.log);
+    };
+    const result = isVoucher
+      ? await decideVoucherUseRequest(decideArgs, req.log)
+      : await decideEarnRequest(decideArgs, req.log);
 
     let toastText;
     if (result.ok) toastText = approve ? '승인 완료!' : '거절 처리했어요';
     else if (result.error === 'already_decided') toastText = '이미 처리된 청구예요';
-    else toastText = '청구를 찾을 수 없어요';
+    else if (result.error === 'voucher_not_active') toastText = '이미 사용된 사용권이에요';
+    else toastText = isVoucher ? '신청을 찾을 수 없어요' : '청구를 찾을 수 없어요';
 
     await tgCall('answerCallbackQuery', { callback_query_id: cb.id, text: toastText }, req.log);
 

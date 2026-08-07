@@ -21,7 +21,7 @@ export async function catalogRoutes(app) {
   app.get('/catalog/spend', { onRequest: app.authRequired }, async (req) => {
     const activeOnly = req.user.role === 'child';
     const { rows } = await q(
-      `SELECT id, name, kind, unit_minutes, unit_label, price_points, active, sort
+      `SELECT id, name, kind, unit_minutes, unit_label, price_points, active, sort, use_approval
        FROM spend_catalog
        WHERE family_id = $1 ${activeOnly ? 'AND active' : ''}
        ORDER BY sort, id`, [req.user.family_id]);
@@ -97,12 +97,16 @@ export async function catalogRoutes(app) {
     if (kind === 'time_voucher' && (!Number.isInteger(Number(unit_minutes)) || Number(unit_minutes) <= 0)) {
       return reply.code(400).send({ error: 'unit_minutes_required' });
     }
+    // use_approval: 사용권을 쓰기 전에 부모 승인을 받을지 (기본 켜짐).
+    // 컴퓨터처럼 가드 프로그램이 실시간으로 차감하는 항목만 꺼서 즉시 사용하게 한다.
+    const useApproval = (req.body && req.body.use_approval) === undefined
+      ? true : Boolean(req.body.use_approval);
     const { rows } = await q(
-      `INSERT INTO spend_catalog (family_id, name, kind, unit_minutes, unit_label, price_points, sort)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      `INSERT INTO spend_catalog (family_id, name, kind, unit_minutes, unit_label, price_points, sort, use_approval)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
       [req.user.family_id, name, kind,
        kind === 'time_voucher' ? Number(unit_minutes) : null,
-       unit_label || null, Number(price_points), Number(sort) || 0]);
+       unit_label || null, Number(price_points), Number(sort) || 0, useApproval]);
     return { id: Number(rows[0].id) };
   });
 
@@ -115,10 +119,12 @@ export async function catalogRoutes(app) {
          unit_label = COALESCE($3, unit_label),
          price_points = COALESCE($4, price_points),
          active = COALESCE($5, active),
-         sort = COALESCE($6, sort)
-       WHERE id = $7 AND family_id = $8`,
+         sort = COALESCE($6, sort),
+         use_approval = COALESCE($7, use_approval)
+       WHERE id = $8 AND family_id = $9`,
       [b.name ?? null, b.unit_minutes ?? null, b.unit_label ?? null,
        b.price_points ?? null, b.active ?? null, b.sort ?? null,
+       b.use_approval === undefined || b.use_approval === null ? null : Boolean(b.use_approval),
        req.params.id, req.user.family_id]);
     if (!rowCount) return reply.code(404).send({ error: 'not_found' });
     return { ok: true };

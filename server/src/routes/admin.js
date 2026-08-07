@@ -38,6 +38,7 @@ export async function adminRoutes(app) {
     const done = await tx(async (c) => {
       const f = await c.query('SELECT id FROM family WHERE id = $1', [fid]);
       if (!f.rows[0]) return false;
+      await c.query('DELETE FROM voucher_use_request WHERE family_id = $1', [fid]);
       await c.query('DELETE FROM voucher_usage WHERE voucher_id IN (SELECT id FROM voucher WHERE family_id = $1)', [fid]);
       await c.query('DELETE FROM voucher WHERE family_id = $1', [fid]);
       await c.query('DELETE FROM spend_order WHERE family_id = $1', [fid]);
@@ -133,6 +134,7 @@ export async function adminRoutes(app) {
       await c.query('UPDATE earn_request SET decided_by = NULL WHERE decided_by = $1', [uid]);
       await c.query('UPDATE spend_order SET settled_by = NULL WHERE settled_by = $1', [uid]);
       // 본인 소유 데이터 삭제
+      await c.query('DELETE FROM voucher_use_request WHERE user_id = $1', [uid]);
       await c.query('DELETE FROM voucher_usage WHERE voucher_id IN (SELECT id FROM voucher WHERE user_id = $1)', [uid]);
       await c.query('DELETE FROM voucher WHERE user_id = $1', [uid]);
       await c.query('DELETE FROM spend_order WHERE user_id = $1', [uid]);
