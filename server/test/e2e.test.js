@@ -345,6 +345,37 @@ async function main() {
     const det = await api('GET', `/api/notices/${n1.id}`, null, tokens.child, 200);
     assert.equal(det.title, '부모 공지');
     assert.ok(Array.isArray(det.images));
+    // --- v1.17.0: 공지 댓글 (최대 100자, 작성자/부모 삭제, 공지 삭제 시 연쇄 삭제)
+    {
+      await api('POST', `/api/notices/${n1.id}/comments`, { content: '   ' }, tokens.child, 400);
+      const cm1 = await api('POST', `/api/notices/${n1.id}/comments`,
+        { content: '네 알겠어요' }, tokens.child, 200);
+      const cm2 = await api('POST', `/api/notices/${n1.id}/comments`,
+        { content: '고마워' }, tokens.parent, 200);
+      // 100자 초과는 잘라서 저장
+      const cm3 = await api('POST', `/api/notices/${n1.id}/comments`,
+        { content: 'ㄱ'.repeat(150) }, tokens.parent, 200);
+      let cl = await api('GET', `/api/notices/${n1.id}/comments`, null, tokens.child, 200);
+      assert.equal(cl.length, 3);
+      assert.equal(cl[0].content, '네 알겠어요');
+      assert.ok(cl[0].user_name);
+      assert.ok(cl[0].created_at);
+      assert.equal(cl[2].content.length, 100);
+      // 목록에 댓글 수 노출
+      const withCount = await api('GET', '/api/notices?limit=20&offset=0', null, tokens.parent, 200);
+      assert.equal(withCount.rows.find((r) => r.id === n1.id).comment_count, 3);
+      assert.equal(withCount.rows.find((r) => r.id === n2.id).comment_count, 0);
+      // 자녀는 남의 댓글 삭제 불가, 본인 댓글은 가능 / 부모는 아무 댓글이나 가능
+      await api('DELETE', `/api/notices/${n1.id}/comments/${cm2.id}`, null, tokens.child, 403);
+      await api('DELETE', `/api/notices/${n1.id}/comments/${cm1.id}`, null, tokens.child, 200);
+      await api('DELETE', `/api/notices/${n1.id}/comments/${cm1.id}`, null, tokens.child, 404);
+      await api('DELETE', `/api/notices/${n1.id}/comments/${cm3.id}`, null, tokens.parent, 200);
+      cl = await api('GET', `/api/notices/${n1.id}/comments`, null, tokens.child, 200);
+      assert.equal(cl.length, 1);
+      // 없는 공지에는 댓글 불가
+      await api('POST', '/api/notices/99999/comments', { content: 'x' }, tokens.child, 404);
+    }
+
     // 자녀는 남(부모) 공지 삭제 불가 / 본인 공지는 삭제 가능 / 부모는 누구 공지든 삭제 가능
     await api('DELETE', `/api/notices/${n1.id}`, null, tokens.child, 403);
     await api('DELETE', `/api/notices/${n2.id}`, null, tokens.child, 200);
@@ -352,6 +383,8 @@ async function main() {
     await api('DELETE', `/api/notices/${n1.id}`, null, tokens.parent, 404);
     const empty = await api('GET', '/api/notices/latest', null, tokens.parent, 200);
     assert.equal(empty.notice, null);
+    // 공지가 지워지면 댓글도 함께 사라진다 (FK ON DELETE CASCADE)
+    assert.equal((await api('GET', `/api/notices/${n1.id}/comments`, null, tokens.parent, 200)).length, 0);
   }
 
   // --- v1.16.0: 사용권 사용 전 부모 승인 (휴대폰/게임기)

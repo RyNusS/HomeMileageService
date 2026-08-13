@@ -123,7 +123,10 @@ function NoticeList({ onBack, onOpen, onWrite }) {
         {data.rows.map((n) => (
           <div className="row tappable" key={n.id} onClick={() => onOpen(n.id)}>
             <div className="main">
-              <div className="name">{n.title}</div>
+              <div className="name">
+                {n.title}
+                {n.comment_count > 0 && <span className="nt-cc">💬 {n.comment_count}</span>}
+              </div>
               <div className="meta">{n.user_name} · {fmtDTY(n.created_at)}</div>
             </div>
             <span className="chev">›</span>
@@ -142,18 +145,30 @@ function NoticeList({ onBack, onOpen, onWrite }) {
   </>);
 }
 
+const MAX_COMMENT = 100;
+
 function NoticeDetail({ me, id, onBack, onDeleted }) {
   const [n, setN] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [comments, setComments] = useState([]);
+  const [writing, setWriting] = useState(false);   // 댓글 입력창 열림 여부
+  const [text, setText] = useState('');
+  const inputRef = useRef(null);
+
+  const loadComments = useCallback(async () => {
+    try { setComments(await api('GET', `/api/notices/${id}/comments`)); } catch { /* 부가정보 */ }
+  }, [id]);
 
   useEffect(() => {
     (async () => {
       try { setN(await api('GET', `/api/notices/${id}`)); }
       catch (ex) { toast(t(ex.message), 'error'); onBack(); }
     })();
+    loadComments();
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const canDelete = n && (n.user_id === me.id || me.role === 'parent' || me.role === 'super_admin');
+  const isParent = me.role === 'parent' || me.role === 'super_admin';
 
   const remove = async () => {
     if (!window.confirm('이 공지사항을 삭제할까요?')) return;
@@ -164,6 +179,33 @@ function NoticeDetail({ me, id, onBack, onDeleted }) {
       onDeleted();
     } catch (ex) { toast(t(ex.message), 'error'); }
     setBusy(false);
+  };
+
+  const openWrite = () => {
+    setWriting(true);
+    setTimeout(() => inputRef.current && inputRef.current.focus(), 50);
+  };
+
+  const submitComment = async () => {
+    const body = text.trim();
+    if (!body) { toast('댓글을 입력해 주세요', 'error'); return; }
+    setBusy(true);
+    try {
+      await api('POST', `/api/notices/${id}/comments`, { content: body });
+      setText(''); setWriting(false);
+      toast('댓글을 남겼어요');
+      await loadComments();
+    } catch (ex) { toast(t(ex.message), 'error'); }
+    setBusy(false);
+  };
+
+  const removeComment = async (c) => {
+    if (!window.confirm(`${c.user_name}님의 댓글을 삭제할까요?\n"${c.content}"`)) return;
+    try {
+      await api('DELETE', `/api/notices/${id}/comments/${c.id}`);
+      toast('댓글을 삭제했어요');
+      await loadComments();
+    } catch (ex) { toast(t(ex.message), 'error'); }
   };
 
   return (<>
@@ -180,8 +222,46 @@ function NoticeDetail({ me, id, onBack, onDeleted }) {
             <p className="notice">내용이 없어요</p>
           )}
         </div>
+
+        <div className="card">
+          <h3>댓글 {comments.length}개</h3>
+          {comments.map((c) => (
+            <div className="row nt-cmt" key={c.id}>
+              <div className="main">
+                <div className="nt-cmt-body">{c.content}</div>
+                <div className="meta">{c.user_name} · {fmtDTY(c.created_at)}</div>
+              </div>
+              {(c.user_id === me.id || isParent) && (
+                <button className="nt-cmt-x" onClick={() => removeComment(c)}
+                  aria-label="댓글 삭제">✕</button>
+              )}
+            </div>
+          ))}
+          {comments.length === 0 && <p className="notice">아직 댓글이 없어요</p>}
+        </div>
+
+        {writing ? (
+          <div className="card">
+            <label className="fld">댓글 (최대 {MAX_COMMENT}자)</label>
+            <textarea ref={inputRef} rows={3} maxLength={MAX_COMMENT} value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="공지에 한마디 남겨 주세요" />
+            <div className="meta" style={{ textAlign: 'right' }}>{text.length}/{MAX_COMMENT}</div>
+            <div className="btn-row">
+              <button className="primary" disabled={busy || !text.trim()} onClick={submitComment}>
+                등록하기
+              </button>
+              <button className="cancel" onClick={() => { setWriting(false); setText(''); }}>취소</button>
+            </div>
+          </div>
+        ) : (
+          <button className="small" style={{ width: '100%', padding: 12 }} onClick={openWrite}>
+            💬 댓글 달기
+          </button>
+        )}
+
         {canDelete && (
-          <button className="small danger" style={{ width: '100%', padding: 12 }}
+          <button className="small danger" style={{ width: '100%', padding: 12, marginTop: 10 }}
             disabled={busy} onClick={remove}>공지 삭제</button>
         )}
       </>)}
