@@ -5,11 +5,13 @@ import SettingsModal from '../settings.jsx';
 import { getSubscriptionState, enablePush } from '../pushClient.js';
 import usePullToRefresh from '../pullToRefresh.js';
 import { NoticeSection } from './Notices.jsx';
+import ChatTab, { initialTab, useChatUnread } from './Chat.jsx';
 
 const fmtDT = (s) => new Date(s).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 export default function ChildHome({ me, refreshMe, logout }) {
-  const [tab, setTab] = useState('home');
+  const [tab, setTab] = useState(() => initialTab('home'));
+  const unread = useChatUnread(tab === 'chat');   // 채팅 탭 배지
   const [showSettings, setShowSettings] = useState(false);
   const [vouchers, setVouchers] = useState({ remaining_minutes: 0, vouchers: [] });
   const [pushState, setPushState] = useState('unknown');
@@ -67,7 +69,8 @@ export default function ChildHome({ me, refreshMe, logout }) {
           <button onClick={logout}>로그아웃</button>
         </div>
       </div>
-      <div className="content" ref={contentRef} {...handlers}>
+      {tab === 'chat' && <ChatTab me={me} />}
+      <div className="content" ref={contentRef} {...handlers} hidden={tab === 'chat'}>
         <div className="ptr" style={{ height: ptr }}>
           <span className={`ptr-ico ${refreshing.current ? 'spin' : (ptr >= 60 ? 'ready' : '')}`}>↻</span>
         </div>
@@ -85,10 +88,11 @@ export default function ChildHome({ me, refreshMe, logout }) {
       </div>
       {showSettings && <SettingsModal me={me} refreshMe={refreshMe} onClose={() => setShowSettings(false)} />}
       <nav className="tabbar">
-        {[['home', '🏠', '홈'], ['earn', '⭐', '적립'], ['shop', '🛍️', '상점'],
+        {[['home', '🏠', '홈'], ['chat', '💬', '채팅'], ['earn', '⭐', '적립'], ['shop', '🛍️', '상점'],
           ['voucher', '🎟️', '사용권'], ['history', '📋', '내역']].map(([k, ico, label]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
             <span className="ico">{ico}</span>{label}
+            {k === 'chat' && unread > 0 && <span className="tab-badge">{unread > 99 ? '99+' : unread}</span>}
           </button>
         ))}
       </nav>

@@ -64,6 +64,10 @@ function attachNativeListeners(pn) {
   pn.addListener('registration', (t) => {
     if (t && t.value) api('POST', '/api/push/fcm-token', { token: t.value }).catch(() => {});
   });
+  // 앱이 화면에 떠 있을 때 도착한 푸시는 알림창에 뜨지 않으므로 화면 쪽(배지·토스트)에 알려준다
+  pn.addListener('pushNotificationReceived', (n) => {
+    try { window.dispatchEvent(new CustomEvent('hms:push', { detail: n || {} })); } catch { /* ignore */ }
+  });
   pn.addListener('pushNotificationActionPerformed', (ev) => {
     const url = ev && ev.notification && ev.notification.data && ev.notification.data.url;
     if (url && url.startsWith('/')) window.location.href = url;

@@ -449,6 +449,71 @@ async function main() {
       (await api('GET', '/api/vouchers', null, tokens.child, 200)).remaining_minutes, before - 40);
   }
 
+  // --- 가족 채팅 (v1.18.0)
+  {
+    const init0 = await api('GET', '/api/chat/messages', null, tokens.parent, 200);
+    assert.deepEqual(init0.rows, []); assert.equal(init0.has_more, false);
+    assert.equal((await api('GET', '/api/chat/unread', null, tokens.parent, 200)).count, 0);
+    await api('POST', '/api/chat/messages', { content: '   ' }, tokens.child, 400);
+
+    const m1 = await api('POST', '/api/chat/messages', { content: '엄마 ' + 'a'.repeat(600) }, tokens.child, 200);
+    assert.equal(m1.kind, 'text'); assert.equal(m1.content.length, 500);
+    assert.equal((await api('GET', '/api/chat/unread', null, tokens.parent, 200)).count, 1);
+    assert.equal((await api('GET', '/api/chat/unread', null, tokens.child, 200)).count, 0);
+
+    // 부모가 채팅 화면을 보면(active=1) 읽음 처리
+    const seen = await api('GET', '/api/chat/messages?since=0&active=1', null, tokens.parent, 200);
+    assert.equal(seen.rows.length, 1); assert.equal(seen.rows[0].id, m1.id);
+    assert.equal((await api('GET', '/api/chat/unread', null, tokens.parent, 200)).count, 0);
+
+    // 사진 메시지 (multipart)
+    const fd = new FormData();
+    fd.append('content', '');
+    fd.append('photo', new Blob([Buffer.from('89504e470d0a1a0a', 'hex')], { type: 'image/png' }), 'p.png');
+    const pres = await fetch(base + '/api/chat/messages', {
+      method: 'POST', headers: { authorization: `Bearer ${tokens.parent}` }, body: fd,
+    });
+    assert.equal(pres.status, 200);
+    const m2 = await pres.json();
+    assert.equal(m2.kind, 'photo'); assert.ok(m2.image && m2.image.startsWith('chat_'));
+    const img = await fetch(`${base}/api/uploads/${m2.image}`, { headers: { authorization: `Bearer ${tokens.child}` } });
+    assert.equal(img.status, 200);
+    assert.equal((await fetch(`${base}/api/uploads/${m2.image}`)).status, 401);
+
+    // 자녀 폴링: m1 이후 → 사진 1건
+    const poll = await api('GET', `/api/chat/messages?since=${m1.id}&active=1`, null, tokens.child, 200);
+    assert.equal(poll.rows.length, 1); assert.equal(poll.rows[0].id, m2.id);
+
+    // 삭제: 자녀는 남의 것 403, 부모 본인 것 200, 재삭제 404, 폴링에 deleted 포함
+    await api('DELETE', `/api/chat/messages/${m2.id}`, null, tokens.child, 403);
+    await api('DELETE', `/api/chat/messages/${m2.id}`, null, tokens.parent, 200);
+    await api('DELETE', `/api/chat/messages/${m2.id}`, null, tokens.parent, 404);
+    const poll2 = await api('GET', `/api/chat/messages?since=${m2.id}`, null, tokens.child, 200);
+    assert.deepEqual(poll2.rows, []); assert.deepEqual(poll2.deleted, [m2.id]);
+    const initD = await api('GET', '/api/chat/messages', null, tokens.child, 200);
+    assert.equal(initD.rows.find((r) => r.id === m2.id).deleted, true);
+    // 부모가 자녀 메시지 삭제 가능
+    await api('DELETE', `/api/chat/messages/${m1.id}`, null, tokens.parent, 200);
+
+    // 페이징: 130개 추가 → 최초 로드는 10일치 전부(132), before 커서로 100개씩
+    const ids = [];
+    for (let i = 0; i < 130; i++) ids.push((await api('POST', '/api/chat/messages', { content: `m${i}` }, tokens.child, 200)).id);
+    const all = await api('GET', '/api/chat/messages', null, tokens.parent, 200);
+    assert.equal(all.rows.length, 132); assert.equal(all.has_more, false);
+    const pg1 = await api('GET', `/api/chat/messages?before=${ids[105]}`, null, tokens.parent, 200);
+    assert.equal(pg1.rows.length, 100); assert.equal(pg1.has_more, true);
+    assert.equal(pg1.rows[99].id, ids[104]); assert.equal(pg1.rows[0].id, ids[5]);
+    const pg2 = await api('GET', `/api/chat/messages?before=${pg1.rows[0].id}`, null, tokens.parent, 200);
+    assert.equal(pg2.rows.length, 7); assert.equal(pg2.has_more, false);
+    assert.equal((await api('GET', '/api/chat/unread', null, tokens.parent, 200)).count, 130);
+
+    // 10일 내 대화가 없으면 마지막 100개
+    await pool.query(`UPDATE chat_message SET created_at = now() - interval '20 days'`);
+    const old = await api('GET', '/api/chat/messages', null, tokens.parent, 200);
+    assert.equal(old.rows.length, 100); assert.equal(old.has_more, true);
+    assert.equal(old.rows[99].id, ids[129]); assert.equal(old.rows[0].id, ids[30]);
+  }
+
   console.log('ALL E2E TESTS PASSED');
 }
 

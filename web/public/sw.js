@@ -3,7 +3,7 @@
 //    immediately (fixes stale UI after an update), cache as offline fallback.
 //  - hashed static assets: cache-first (filenames change per build, so it's safe).
 //  - API (/api/*): bypass the SW entirely.
-const CACHE = 'hms-v2';
+const CACHE = 'hms-v3';
 self.addEventListener('install', (e) => { self.skipWaiting(); });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((keys) =>
@@ -55,12 +55,17 @@ self.addEventListener('push', (e) => {
     icon: '/icon-192.png',
     badge: '/icon-192.png',
     data: { url: data.url || '/' },
+    ...(data.tag ? { tag: data.tag, renotify: true } : {}),
   }));
 });
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/';
   e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
-    for (const c of list) { if ('focus' in c) return c.focus(); }
-    return clients.openWindow(e.notification.data && e.notification.data.url || '/');
+    for (const c of list) {
+      if ('navigate' in c && url !== '/') return c.navigate(url).then((w) => (w && w.focus ? w.focus() : c.focus()));
+      if ('focus' in c) return c.focus();
+    }
+    return clients.openWindow(url);
   }));
 });

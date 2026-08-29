@@ -24,6 +24,7 @@ import { pushRoutes } from './routes/push.js';
 import { telegramRoutes } from './routes/telegram.js';
 import { opsRoutes } from './routes/ops.js';
 import { guardRoutes } from './routes/guard.js';
+import { chatRoutes } from './routes/chat.js';
 import { initPush } from './push.js';
 
 const HOST = process.env.HOST || '0.0.0.0';
@@ -102,6 +103,7 @@ export function buildApp() {
   app.register(telegramRoutes, { prefix: '/api' });
   app.register(opsRoutes, { prefix: '/api' });
   app.register(guardRoutes, { prefix: '/api' });
+  app.register(chatRoutes, { prefix: '/api', uploadDir: UPLOAD_DIR });
 
   return app;
 }

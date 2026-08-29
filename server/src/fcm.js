@@ -60,6 +60,7 @@ export async function fcmToUser(userId, payload, log) {
           channelId: 'hms_default',
           icon: 'ic_stat_hms',
           color: '#4f7cf7',
+          ...(payload.tag ? { tag: String(payload.tag) } : {}),   // 같은 tag는 알림창에서 최신 한 건으로 교체
         },
       },
     });

@@ -37,6 +37,7 @@ export const ERR_KO = {
   bad_daily_limit: '1일 횟수는 1~9 사이로 입력해 주세요',
   title_required: '제목을 입력해 주세요',
   comment_required: '댓글을 입력해 주세요',
+  message_required: '메시지를 입력해 주세요',
   forbidden: '권한이 없어요',
   not_found: '이미 삭제되었거나 찾을 수 없어요',
 };
