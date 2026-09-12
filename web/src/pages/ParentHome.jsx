@@ -12,6 +12,28 @@ const fmtDT = (s) => new Date(s).toLocaleString('ko-KR', { month: 'numeric', day
 const fmtDTY = (s) => new Date(s).toLocaleString('ko-KR', { year: '2-digit', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 // auth-protected proof photo: thumbnail + tap to enlarge
+// 부호 있는 포인트 입력: [+ 지급 | − 차감] 토글 + 숫자 칸.
+// 삼성키보드 숫자패드엔 '-' 키가 없어 음수를 직접 치게 하지 않는다. 기본은 지급(+).
+// value 는 '-50' 같은 부호 포함 문자열(또는 숫자), onChange 도 같은 형식으로 돌려준다.
+function SignedPointsInput({ value, onChange, placeholder = '예: 100', autoFocus }) {
+  const str = value === null || value === undefined ? '' : String(value);
+  const [sign, setSign] = useState(str.startsWith('-') ? -1 : 1);
+  const digits = str.replace(/[^0-9]/g, '');
+  const emit = (sg, d) => onChange(d ? (sg < 0 ? '-' : '') + d : '');
+  return (
+    <div className="sign-row">
+      <div className="sign-toggle">
+        <button type="button" className={sign > 0 ? 'on plus' : ''}
+          onClick={() => { setSign(1); emit(1, digits); }}>+ 지급</button>
+        <button type="button" className={sign < 0 ? 'on minus' : ''}
+          onClick={() => { setSign(-1); emit(-1, digits); }}>− 차감</button>
+      </div>
+      <input inputMode="numeric" placeholder={placeholder} value={digits} autoFocus={autoFocus}
+        onChange={(e) => emit(sign, e.target.value.replace(/[^0-9]/g, ''))} />
+    </div>
+  );
+}
+
 function ProofThumb({ path }) {
   const [url, setUrl] = useState(null);
   const [open, setOpen] = useState(false);
@@ -358,8 +380,9 @@ function FamilyTab() {
               <input inputMode="numeric" value={f.pin || ''} onChange={(e) => setF({ ...f, pin: e.target.value })} />
             </>)}
             {mode.type === 'adjust' && (<>
-              <label className="fld">포인트 (양수=지급, 음수=차감)</label>
-              <input inputMode="numeric" value={f.amount || ''} onChange={(e) => setF({ ...f, amount: e.target.value })} placeholder="예: 100 또는 -50" />
+              <label className="fld">포인트</label>
+              <SignedPointsInput value={f.amount} placeholder="예: 100"
+                onChange={(v) => setF({ ...f, amount: v })} />
               <label className="fld">메모</label>
               <input value={f.memo || ''} onChange={(e) => setF({ ...f, memo: e.target.value })} placeholder="예: 생일 보너스" />
             </>)}
@@ -384,10 +407,6 @@ function fmtMissDays(days) {
   return d.map((x) => DAY_NAMES[x]).join('·');
 }
 
-// 미달성 포인트 부호 도우미: 값이 비어 있으면 기본 '차감(-)'
-const missSign = (f) => f.miss_sign
-  ?? (String(f.miss_points ?? '') === '' || String(f.miss_points).startsWith('-') ? -1 : 1);
-const withSign = (v, sign) => { const d = String(v ?? '').replace(/[^0-9]/g, ''); return d ? (sign < 0 ? '-' : '') + d : ''; };
 
 function CatalogTab() {
   const [earn, setEarn] = useState([]);
@@ -576,17 +595,8 @@ function CatalogTab() {
                   결과는 다음 날 아침 6시에 기록·알림돼요.
                 </p>
                 <label className="fld">미달성 포인트</label>
-                {/* 삼성키보드 숫자패드엔 '-' 키가 없어 부호는 토글로, 칸에는 숫자만 입력 */}
-                <div className="sign-row">
-                  <div className="sign-toggle">
-                    <button type="button" className={missSign(f) < 0 ? 'on minus' : ''}
-                      onClick={() => setF({ ...f, miss_sign: -1, miss_points: withSign(f.miss_points, -1) })}>− 차감</button>
-                    <button type="button" className={missSign(f) > 0 ? 'on plus' : ''}
-                      onClick={() => setF({ ...f, miss_sign: 1, miss_points: withSign(f.miss_points, 1) })}>+ 지급</button>
-                  </div>
-                  <input inputMode="numeric" placeholder="예: 10" value={String(f.miss_points ?? '').replace('-', '')}
-                    onChange={(e) => setF({ ...f, miss_points: withSign(e.target.value.replace(/[^0-9]/g, ''), missSign(f)) })} />
-                </div>
+                <SignedPointsInput value={f.miss_points} placeholder="예: 10"
+                  onChange={(v) => setF({ ...f, miss_points: v })} />
                 <label className="fld">적용 요일</label>
                 <div className="day-picker">
                   <label className="day-chip">
