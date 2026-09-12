@@ -384,6 +384,11 @@ function fmtMissDays(days) {
   return d.map((x) => DAY_NAMES[x]).join('·');
 }
 
+// 미달성 포인트 부호 도우미: 값이 비어 있으면 기본 '차감(-)'
+const missSign = (f) => f.miss_sign
+  ?? (String(f.miss_points ?? '') === '' || String(f.miss_points).startsWith('-') ? -1 : 1);
+const withSign = (v, sign) => { const d = String(v ?? '').replace(/[^0-9]/g, ''); return d ? (sign < 0 ? '-' : '') + d : ''; };
+
 function CatalogTab() {
   const [earn, setEarn] = useState([]);
   const [spend, setSpend] = useState([]);
@@ -567,12 +572,21 @@ function CatalogTab() {
               </label>
               {f.miss_enabled && (<>
                 <p className="notice" style={{ marginTop: -2 }}>
-                  그날 밤 12시(23:59:59)까지 청구가 등록되지 않으면 아래 포인트를 자동으로 줘요.
-                  차감하려면 음수(예: -10)로 입력하세요. 결과는 다음 날 아침 6시에 기록·알림돼요.
+                  그날 밤 12시(23:59:59)까지 청구가 등록되지 않으면 아래 포인트를 자동으로 적용해요.
+                  결과는 다음 날 아침 6시에 기록·알림돼요.
                 </p>
-                <label className="fld">미달성 포인트 (음수 = 차감)</label>
-                <input inputMode="numeric" placeholder="예: -10" value={f.miss_points ?? ''}
-                  onChange={(e) => setF({ ...f, miss_points: e.target.value.replace(/[^0-9-]/g, '') })} />
+                <label className="fld">미달성 포인트</label>
+                {/* 삼성키보드 숫자패드엔 '-' 키가 없어 부호는 토글로, 칸에는 숫자만 입력 */}
+                <div className="sign-row">
+                  <div className="sign-toggle">
+                    <button type="button" className={missSign(f) < 0 ? 'on minus' : ''}
+                      onClick={() => setF({ ...f, miss_sign: -1, miss_points: withSign(f.miss_points, -1) })}>− 차감</button>
+                    <button type="button" className={missSign(f) > 0 ? 'on plus' : ''}
+                      onClick={() => setF({ ...f, miss_sign: 1, miss_points: withSign(f.miss_points, 1) })}>+ 지급</button>
+                  </div>
+                  <input inputMode="numeric" placeholder="예: 10" value={String(f.miss_points ?? '').replace('-', '')}
+                    onChange={(e) => setF({ ...f, miss_points: withSign(e.target.value.replace(/[^0-9]/g, ''), missSign(f)) })} />
+                </div>
                 <label className="fld">적용 요일</label>
                 <div className="day-picker">
                   <label className="day-chip">

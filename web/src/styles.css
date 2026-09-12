@@ -37,6 +37,13 @@ body {
 .day-chip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 9px; border: 1px solid #d9dfeb;
   border-radius: 999px; font-size: 13px; background: #fff; cursor: pointer; }
 .day-chip input { width: auto; margin: 0; }
+/* 미달성 포인트 부호 토글 + 숫자 입력 */
+.sign-row { display: flex; gap: 8px; align-items: stretch; }
+.sign-row input { flex: 1; min-width: 0; }
+.sign-toggle { display: flex; border: 1px solid #d9dfeb; border-radius: 12px; overflow: hidden; flex-shrink: 0; }
+.sign-toggle button { border: 0; background: #fff; color: #667; padding: 0 12px; font-size: 14px; cursor: pointer; }
+.sign-toggle button.on.minus { background: #fdebec; color: var(--red); font-weight: 700; }
+.sign-toggle button.on.plus { background: #e6f7ee; color: var(--green); font-weight: 700; }
 .day-chip:has(input:checked) { background: #e7efff; border-color: var(--blue); color: var(--blue-d); font-weight: 600; }
 
 .balance-card {
