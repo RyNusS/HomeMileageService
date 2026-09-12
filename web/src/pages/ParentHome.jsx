@@ -235,8 +235,8 @@ function HistoryTab({ scrollRef }) {
     })();
   }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const label = { earn: '적립', spend: '구매', adjust: '보정', use: '사용' };
-  const kindClass = { spend: 'buy', use: 'use' };
+  const label = { earn: '적립', spend: '구매', adjust: '보정', use: '사용', miss: '미달성' };
+  const kindClass = { spend: 'buy', use: 'use', miss: 'miss' };
 
   return (
     <>
@@ -374,6 +374,16 @@ function FamilyTab() {
   );
 }
 
+const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
+const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
+// 요일 배열 → '매일' / '월·화·수' 표시
+function fmtMissDays(days) {
+  const d = [...new Set((days || []).map(Number))].sort();
+  if (d.length === 7) return '매일';
+  if (d.length === 0) return '요일 없음';
+  return d.map((x) => DAY_NAMES[x]).join('·');
+}
+
 function CatalogTab() {
   const [earn, setEarn] = useState([]);
   const [spend, setSpend] = useState([]);
@@ -396,7 +406,14 @@ function CatalogTab() {
         const body = {
           name: f.name, points: Number(f.points), proof_required: Boolean(f.proof_required),
           daily_limit: f.daily_limit ? Number(f.daily_limit) : null,
+          miss_enabled: Boolean(f.miss_enabled),
+          miss_points: f.miss_points === '' || f.miss_points === undefined ? null : Number(f.miss_points),
+          miss_days: f.miss_days || [],
         };
+        if (body.miss_enabled) {
+          if (!Number.isInteger(body.miss_points) || body.miss_points === 0) throw new Error('bad_miss_points');
+          if (body.miss_days.length === 0) throw new Error('bad_miss_days');
+        }
         if (mode.item) await api('PATCH', `/api/catalog/earn/${mode.item.id}`, body);
         else await api('POST', '/api/catalog/earn', body);
       } else {
@@ -476,15 +493,24 @@ function CatalogTab() {
                 +{it.points}P{it.proof_required ? ' · 📷' : ''}
                 {it.daily_limit ? ` · 1일 ${it.daily_limit}회` : ''}{it.active ? '' : ' · 숨김'}
               </div>
+              {it.miss_enabled && it.miss_points ? (
+                <div className="meta" style={{ color: it.miss_points < 0 ? 'var(--red)' : 'var(--green)' }}>
+                  미달성 {it.miss_points > 0 ? '+' : ''}{it.miss_points}P · {fmtMissDays(it.miss_days)}
+                </div>
+              ) : null}
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
-              <button className="small ghost" onClick={() => { setMode({ cat: 'earn', item: it }); setF({ ...it, daily_limit: it.daily_limit || '' }); }}>수정</button>
+              <button className="small ghost" onClick={() => {
+                setMode({ cat: 'earn', item: it });
+                setF({ ...it, daily_limit: it.daily_limit || '',
+                  miss_points: it.miss_points ?? '', miss_days: it.miss_days || ALL_DAYS });
+              }}>수정</button>
               <button className="small ghost" onClick={() => toggle('earn', it)}>{it.active ? '숨김' : '표시'}</button>
             </div>
           </div>
         ))}
         <div style={{ paddingTop: 10 }}>
-          <button className="small" onClick={() => { setMode({ cat: 'earn' }); setF({}); }}>+ 적립 항목 추가</button>
+          <button className="small" onClick={() => { setMode({ cat: 'earn' }); setF({ miss_days: ALL_DAYS, miss_points: '' }); }}>+ 적립 항목 추가</button>
         </div>
       </div>
       <div className="section-title">상점 항목 (가격표)</div>
@@ -535,6 +561,36 @@ function CatalogTab() {
                 <option value="2">1일 2회</option>
                 <option value="3">1일 3회</option>
               </select>
+              <label className="fld" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={Boolean(f.miss_enabled)}
+                  onChange={(e) => setF({ ...f, miss_enabled: e.target.checked })} /> 미달성 시 자동 포인트
+              </label>
+              {f.miss_enabled && (<>
+                <p className="notice" style={{ marginTop: -2 }}>
+                  그날 밤 12시(23:59:59)까지 청구가 등록되지 않으면 아래 포인트를 자동으로 줘요.
+                  차감하려면 음수(예: -10)로 입력하세요. 결과는 다음 날 아침 6시에 기록·알림돼요.
+                </p>
+                <label className="fld">미달성 포인트 (음수 = 차감)</label>
+                <input inputMode="numeric" placeholder="예: -10" value={f.miss_points ?? ''}
+                  onChange={(e) => setF({ ...f, miss_points: e.target.value.replace(/[^0-9-]/g, '') })} />
+                <label className="fld">적용 요일</label>
+                <div className="day-picker">
+                  <label className="day-chip">
+                    <input type="checkbox" checked={(f.miss_days || []).length === 7}
+                      onChange={(e) => setF({ ...f, miss_days: e.target.checked ? ALL_DAYS : [] })} /> 매일
+                  </label>
+                  {DAY_NAMES.map((nm, d) => (
+                    <label className="day-chip" key={d}>
+                      <input type="checkbox" checked={(f.miss_days || []).includes(d)}
+                        onChange={(e) => {
+                          const cur = new Set(f.miss_days || []);
+                          e.target.checked ? cur.add(d) : cur.delete(d);
+                          setF({ ...f, miss_days: [...cur].sort() });
+                        }} /> {nm}
+                    </label>
+                  ))}
+                </div>
+              </>)}
             </>) : (<>
               <label className="fld">종류</label>
               <select value={f.kind || 'time_voucher'} onChange={(e) => setF({ ...f, kind: e.target.value })} disabled={Boolean(mode.item)}>

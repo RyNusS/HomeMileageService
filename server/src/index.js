@@ -26,6 +26,7 @@ import { opsRoutes } from './routes/ops.js';
 import { guardRoutes } from './routes/guard.js';
 import { chatRoutes } from './routes/chat.js';
 import { initPush } from './push.js';
+import { startMissScheduler } from './missService.js';
 
 const HOST = process.env.HOST || '0.0.0.0';
 const PORT = Number(process.env.PORT || 3000);
@@ -114,9 +115,11 @@ if (process.argv[1] && process.argv[1].endsWith('index.js')) {
     .then(() => app.log.info('web push ready'))
     .catch((err) => app.log.warn({ err: err.message }, 'web push init failed'))
     .finally(() => {
-      app.listen({ host: HOST, port: PORT }).catch((err) => {
-        app.log.error(err);
-        process.exit(1);
-      });
+      app.listen({ host: HOST, port: PORT })
+        .then(() => startMissScheduler(app.log))   // 미달성 자동 포인트 (매일 06:00 KST)
+        .catch((err) => {
+          app.log.error(err);
+          process.exit(1);
+        });
     });
 }

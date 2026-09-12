@@ -514,6 +514,76 @@ async function main() {
     assert.equal(old.rows[99].id, ids[129]); assert.equal(old.rows[0].id, ids[30]);
   }
 
+  // ── v1.19.0 미달성 자동 포인트 ─────────────────────────────────────────
+  {
+    const { evaluateMissForDate, runMissCheck } = await import('../src/missService.js');
+    const kst = (await pool.query(`SELECT to_char(now() AT TIME ZONE 'Asia/Seoul','YYYY-MM-DD') d`)).rows[0].d;
+    const yd = (await pool.query(`SELECT to_char((now() AT TIME ZONE 'Asia/Seoul')::date - 1,'YYYY-MM-DD') d`)).rows[0].d;
+    const ydDow = Number((await pool.query(`SELECT extract(dow FROM $1::date)::int x`, [yd])).rows[0].x);
+
+    // 검증: 켜면서 포인트/요일 없으면 400, 0포인트 400
+    await api('POST', '/api/catalog/earn', { name: 'x', points: 5, miss_enabled: true }, tokens.parent, 400);
+    await api('POST', '/api/catalog/earn', { name: 'x', points: 5, miss_enabled: true, miss_points: 0, miss_days: [1] }, tokens.parent, 400);
+    await api('POST', '/api/catalog/earn', { name: 'x', points: 5, miss_enabled: true, miss_points: -5, miss_days: [] }, tokens.parent, 400);
+
+    // A: 매일 -10 (어제 23:59:59 청구 → 달성), B: 매일 -7 (오늘 00:00:01 청구 → 어제 미달성)
+    // C: 어제 요일 제외 (판정 없음), D: 양수 +3 (미달성 시 지급), E: 거절된 청구만 → 미달성
+    const mk = (name, extra) => api('POST', '/api/catalog/earn', { name, points: 5, ...extra }, tokens.parent, 200);
+    const A = await mk('미A', { miss_enabled: true, miss_points: -10, miss_days: [0,1,2,3,4,5,6] });
+    const B = await mk('미B', { miss_enabled: true, miss_points: -7, miss_days: [0,1,2,3,4,5,6] });
+    const C = await mk('미C', { miss_enabled: true, miss_points: -99, miss_days: [(ydDow + 1) % 7] });
+    const D = await mk('미D', { miss_enabled: true, miss_points: 3, miss_days: [ydDow] });
+    const E = await mk('미E', { miss_enabled: true, miss_points: -1, miss_days: [ydDow] });
+    const F = await mk('미F', { miss_enabled: false, miss_points: -50, miss_days: [ydDow] }); // 꺼짐
+    const cat = await api('GET', '/api/catalog/earn', null, tokens.parent, 200);
+    const a = cat.find((x) => x.id === A.id);
+    assert.equal(a.miss_enabled, true); assert.equal(a.miss_points, -10); assert.equal(a.miss_days.length, 7);
+    // 켠 시점(miss_since)이 오늘이라 어제는 판정 대상이 아님 → 3일 전으로 되돌려 테스트
+    await pool.query(`UPDATE earn_catalog SET miss_since = now() - interval '3 days', created_at = now() - interval '3 days'
+                      WHERE id = ANY($1::bigint[])`, [[A.id, B.id, C.id, D.id, E.id, F.id]]);
+    const childId = (await pool.query(`SELECT id FROM app_user WHERE login_id='c1'`)).rows[0].id;
+    await pool.query(`UPDATE app_user SET created_at = now() - interval '30 days' WHERE id = $1`, [childId]);
+    const ins = (cid, ts, st = 'pending') => pool.query(
+      `INSERT INTO earn_request (family_id, user_id, catalog_id, points, status, created_at)
+       VALUES ((SELECT family_id FROM app_user WHERE id=$1), $1, $2, 5, $4, ($3::timestamp AT TIME ZONE 'Asia/Seoul'))`,
+      [childId, cid, ts, st]);
+    await ins(A.id, `${yd} 23:59:59`);
+    await ins(B.id, `${kst} 00:00:01`);
+    await ins(E.id, `${yd} 12:00:00`, 'rejected');
+
+    const before = (await api('GET', '/api/me', null, tokens.child, 200)).balance;
+    const n1 = await evaluateMissForDate(yd, null);
+    assert.equal(n1, 3, 'B, D, E 세 건 부여');            // A 달성, C 요일 아님, F 꺼짐
+    const after = (await api('GET', '/api/me', null, tokens.child, 200)).balance;
+    assert.equal(after - before, -7 + 3 - 1);
+    // 재실행해도 중복 부여 없음
+    assert.equal(await evaluateMissForDate(yd, null), 0);
+    assert.equal((await api('GET', '/api/me', null, tokens.child, 200)).balance, after);
+    // 원장·내역 노출
+    const led = await api('GET', '/api/ledger', null, tokens.child, 200);
+    const miss = led.filter((r) => r.source_type === 'miss');
+    assert.equal(miss.length, 3);
+    assert.ok(miss.some((r) => r.memo === '미달성: 미B' && r.amount === -7));
+    assert.ok(miss.some((r) => r.memo === '미달성: 미D' && r.amount === 3));
+    const fam = await api('GET', '/api/history/family?limit=50', null, tokens.parent, 200);
+    assert.equal(fam.rows.filter((r) => r.source_type === 'miss').length, 3);
+    // 오늘은 아직 판정하지 않음 (runMissCheck 는 어제까지만) + 소급 기록
+    await pool.query(`DELETE FROM app_config WHERE key = 'miss_last_date'`);
+    const r = await runMissCheck(null, { force: true });
+    assert.equal(r.to, yd); assert.equal(r.granted, 0);
+    assert.equal((await pool.query(`SELECT value FROM app_config WHERE key='miss_last_date'`)).rows[0].value, yd);
+    assert.deepEqual(await runMissCheck(null, { force: true }), { skipped: 'up_to_date' });
+    // PATCH 로 끄기/켜기: 끄면 판정 제외, 다시 켜면 miss_since 갱신
+    await api('PATCH', `/api/catalog/earn/${B.id}`, { miss_enabled: false }, tokens.parent, 200);
+    await api('PATCH', `/api/catalog/earn/${B.id}`, { miss_enabled: true, miss_points: -2, miss_days: [1, 2] }, tokens.parent, 200);
+    const b2 = (await api('GET', '/api/catalog/earn', null, tokens.parent, 200)).find((x) => x.id === B.id);
+    assert.equal(b2.miss_points, -2); assert.deepEqual(b2.miss_days, [1, 2]);
+    const since = (await pool.query(`SELECT to_char(miss_since AT TIME ZONE 'Asia/Seoul','YYYY-MM-DD') d FROM earn_catalog WHERE id=$1`, [B.id])).rows[0].d;
+    assert.equal(since, kst);
+    await api('PATCH', `/api/catalog/earn/${B.id}`, { miss_enabled: true, miss_points: 0 }, tokens.parent, 400);
+    console.log('miss penalty ok');
+  }
+
   console.log('ALL E2E TESTS PASSED');
 }
 

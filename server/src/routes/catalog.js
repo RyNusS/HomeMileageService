@@ -7,6 +7,7 @@ export async function catalogRoutes(app) {
     // 자녀에게는 오늘 청구 횟수(대기+승인)를 함께 내려 1일 제한 UI에 사용
     const { rows } = await q(
       `SELECT c.id, c.name, c.points, c.proof_required, c.active, c.sort, c.daily_limit,
+              c.miss_enabled, c.miss_points, c.miss_days,
               (SELECT count(*)::int FROM earn_request r
                WHERE r.catalog_id = c.id AND r.user_id = $2
                  AND r.status IN ('pending','approved')
@@ -36,6 +37,25 @@ export async function catalogRoutes(app) {
     return { ok: true, value: n };
   };
 
+  // 미달성 자동 포인트: { miss_enabled, miss_points(0 제외 정수, 음수 허용), miss_days([0..6]) }
+  // 켜져 있으면 포인트·요일이 반드시 유효해야 한다. 꺼져 있으면 값은 보존만 한다.
+  const parseMiss = (b) => {
+    if (!b || !Object.prototype.hasOwnProperty.call(b, 'miss_enabled')) return { ok: true, has: false };
+    const enabled = Boolean(b.miss_enabled);
+    let points = null;
+    if (b.miss_points !== undefined && b.miss_points !== null && b.miss_points !== '') {
+      const n = Number(b.miss_points);
+      if (!Number.isInteger(n) || n === 0 || Math.abs(n) > 100000) return { ok: false };
+      points = n;
+    }
+    let days = null;
+    if (Array.isArray(b.miss_days)) {
+      days = [...new Set(b.miss_days.map(Number))].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort();
+    }
+    if (enabled && (points === null || !days || days.length === 0)) return { ok: false };
+    return { ok: true, has: true, enabled, points, days };
+  };
+
   app.post('/catalog/earn', { onRequest: app.parentOnly }, async (req, reply) => {
     const { name, points, proof_required = false, sort = 0 } = req.body || {};
     if (!name || !Number.isInteger(Number(points)) || Number(points) <= 0) {
@@ -43,11 +63,17 @@ export async function catalogRoutes(app) {
     }
     const dl = parseDailyLimit(req.body && req.body.daily_limit);
     if (!dl.ok) return reply.code(400).send({ error: 'bad_daily_limit' });
+    const ms = parseMiss(req.body);
+    if (!ms.ok) return reply.code(400).send({ error: 'bad_miss' });
     const { rows } = await q(
-      `INSERT INTO earn_catalog (family_id, name, points, proof_required, sort, daily_limit)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      `INSERT INTO earn_catalog (family_id, name, points, proof_required, sort, daily_limit,
+                                 miss_enabled, miss_points, miss_days, miss_since)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::smallint[], '{0,1,2,3,4,5,6}'),
+               CASE WHEN $7 THEN now() ELSE NULL END)
+       RETURNING id`,
       [req.user.family_id, name, Number(points), Boolean(proof_required),
-       Number(sort) || 0, dl.value]);
+       Number(sort) || 0, dl.value,
+       ms.has ? ms.enabled : false, ms.has ? ms.points : null, ms.has ? ms.days : null]);
     return { id: Number(rows[0].id) };
   });
 
@@ -57,6 +83,9 @@ export async function catalogRoutes(app) {
     const hasDL = Object.prototype.hasOwnProperty.call(b, 'daily_limit');
     const dl = parseDailyLimit(b.daily_limit);
     if (hasDL && !dl.ok) return reply.code(400).send({ error: 'bad_daily_limit' });
+    const ms = parseMiss(b);
+    if (!ms.ok) return reply.code(400).send({ error: 'bad_miss' });
+    // miss_since: 꺼짐→켜짐으로 바뀌는 순간 기록 (그 이전 날짜는 판정하지 않음)
     const { rowCount } = await q(
       `UPDATE earn_catalog SET
          name = COALESCE($1, name),
@@ -64,11 +93,16 @@ export async function catalogRoutes(app) {
          proof_required = COALESCE($3, proof_required),
          active = COALESCE($4, active),
          sort = COALESCE($5, sort),
-         daily_limit = CASE WHEN $6 THEN $7::smallint ELSE daily_limit END
+         daily_limit = CASE WHEN $6 THEN $7::smallint ELSE daily_limit END,
+         miss_since = CASE WHEN $10 AND $11 AND NOT miss_enabled THEN now() ELSE miss_since END,
+         miss_enabled = CASE WHEN $10 THEN $11 ELSE miss_enabled END,
+         miss_points = CASE WHEN $10 THEN COALESCE($12::int, miss_points) ELSE miss_points END,
+         miss_days = CASE WHEN $10 THEN COALESCE($13::smallint[], miss_days) ELSE miss_days END
        WHERE id = $8 AND family_id = $9`,
       [b.name ?? null, b.points ?? null, b.proof_required ?? null,
        b.active ?? null, b.sort ?? null, hasDL, hasDL ? dl.value : null,
-       req.params.id, req.user.family_id]);
+       req.params.id, req.user.family_id,
+       ms.has, ms.has ? ms.enabled : false, ms.has ? ms.points : null, ms.has ? ms.days : null]);
     if (!rowCount) return reply.code(404).send({ error: 'not_found' });
     return { ok: true };
   });

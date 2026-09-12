@@ -31,6 +31,13 @@ body {
 
 .hist-kind.buy { color: var(--amber); font-weight: 600; }
 .hist-kind.use { color: var(--blue); font-weight: 600; }
+.hist-kind.miss { color: var(--red); font-weight: 600; }
+/* 미달성 적용 요일 선택 */
+.day-picker { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.day-chip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 9px; border: 1px solid #d9dfeb;
+  border-radius: 999px; font-size: 13px; background: #fff; cursor: pointer; }
+.day-chip input { width: auto; margin: 0; }
+.day-chip:has(input:checked) { background: #e7efff; border-color: var(--blue); color: var(--blue-d); font-weight: 600; }
 
 .balance-card {
   background: linear-gradient(135deg, var(--blue), #7c5cf7);

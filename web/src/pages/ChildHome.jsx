@@ -192,6 +192,7 @@ function EarnTab({ refreshAll, tick }) {
                 <div className="meta">
                   +{it.points}P{it.proof_required ? ' · 📷 사진 필요' : ''}
                   {it.daily_limit ? ` · 오늘 ${Math.min(it.used_today, it.daily_limit)}/${it.daily_limit}회` : ''}
+                  {it.miss_enabled && it.miss_points ? ` · 안 하면 ${it.miss_points > 0 ? '+' : ''}${it.miss_points}P` : ''}
                 </div>
               </div>
               <button className="small" disabled={Boolean(capped)} onClick={() => setSel(it)}>
@@ -428,7 +429,7 @@ function HistoryTab({ tick }) {
         api('GET', '/api/ledger'),
         api('GET', '/api/vouchers/usage').catch(() => []),
       ]);
-      const label = { earn: '적립', spend: '구매', adjust: '보정' };
+      const label = { earn: '적립', spend: '구매', adjust: '보정', miss: '미달성' };
       const merged = [
         ...ledger.map((r) => ({
           key: `l${r.id}`, when: r.created_at, kind: label[r.source_type],
@@ -456,7 +457,7 @@ function HistoryTab({ tick }) {
           <div className="main">
             <div className="name">{r.name}</div>
             <div className="meta">
-              {fmtDT(r.when)} · <span className={`hist-kind ${r.kind === '사용' ? 'use' : r.kind === '구매' ? 'buy' : ''}`}>{r.kind}</span>
+              {fmtDT(r.when)} · <span className={`hist-kind ${r.kind === '사용' ? 'use' : r.kind === '구매' ? 'buy' : r.kind === '미달성' ? 'miss' : ''}`}>{r.kind}</span>
             </div>
           </div>
           <span className={r.rightClass}>{r.right}</span>
