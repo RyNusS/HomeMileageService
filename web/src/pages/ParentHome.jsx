@@ -307,6 +307,20 @@ function FamilyTab() {
 
   const close = () => { setMode(null); setF({}); };
 
+  // 구성원 줄에 보이는 AI 한 줄 요약
+  const aiSummary = (u) => (u.ai_enabled
+    ? `AI ${u.ai_used}/${u.ai_daily_limit}회`
+    : 'AI 꺼짐');
+
+  const openAi = (u) => {
+    setMode({ type: 'ai', user: u });
+    setF({
+      ai_enabled: u.ai_enabled,
+      ai_daily_limit: String(u.ai_daily_limit),
+      ai_homework_guard: u.ai_homework_guard,
+    });
+  };
+
   const removeChild = async (u) => {
     if (!window.confirm(`'${u.name}' 계정을 삭제할까요?\n삭제하면 로그인할 수 없어요. (기록은 보존됩니다)`)) return;
     try {
@@ -325,6 +339,13 @@ function FamilyTab() {
       } else if (mode.type === 'pin') {
         await api('POST', `/api/users/${mode.user.id}/reset-pin`, { pin: f.pin });
         toast(`${mode.user.name}의 PIN을 재설정했어요`);
+      } else if (mode.type === 'ai') {
+        await api('PATCH', `/api/users/${mode.user.id}/ai`, {
+          ai_enabled: !!f.ai_enabled,
+          ai_daily_limit: Number(f.ai_daily_limit),
+          ai_homework_guard: !!f.ai_homework_guard,
+        });
+        toast(`${mode.user.name}의 AI 설정을 저장했어요`);
       } else if (mode.type === 'adjust') {
         const amt = Number(f.amount);
         await api('POST', `/api/users/${mode.user.id}/adjust`, { amount: amt, memo: f.memo || '' });
@@ -345,10 +366,13 @@ function FamilyTab() {
           <div className="row" key={u.id}>
             <div className="main">
               <div className="name">{u.role === 'parent' ? '👤' : '🧒'} {u.name}</div>
-              <div className="meta">@{u.login_id} · {u.balance.toLocaleString()}P</div>
+              <div className="meta">
+                @{u.login_id} · {u.balance.toLocaleString()}P · {aiSummary(u)}
+              </div>
             </div>
             {u.role === 'child' && (
               <div style={{ display: 'flex', gap: 6 }}>
+                <button className="small ghost" onClick={() => openAi(u)}>AI</button>
                 <button className="small ghost" onClick={() => { setMode({ type: 'pin', user: u }); setF({}); }}>PIN</button>
                 <button className="small ghost" onClick={() => { setMode({ type: 'adjust', user: u }); setF({}); }}>지급/차감</button>
                 <button className="small danger" onClick={() => removeChild(u)}>삭제</button>
@@ -364,6 +388,7 @@ function FamilyTab() {
             <div className="modal-head">
               <h3>{mode.type === 'new' ? '자녀 계정 만들기'
                 : mode.type === 'pin' ? `${mode.user.name} PIN 재설정`
+                : mode.type === 'ai' ? `${mode.user.name} AI 대화 설정`
                 : `${mode.user.name} 마일리지 지급/차감`}</h3>
               <button className="modal-close" onClick={close}>✕</button>
             </div>
@@ -378,6 +403,25 @@ function FamilyTab() {
             {mode.type === 'pin' && (<>
               <label className="fld">새 PIN (숫자 4~6자리)</label>
               <input inputMode="numeric" value={f.pin || ''} onChange={(e) => setF({ ...f, pin: e.target.value })} />
+            </>)}
+            {mode.type === 'ai' && (<>
+              <label className="fld" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={Boolean(f.ai_enabled)}
+                  onChange={(e) => setF({ ...f, ai_enabled: e.target.checked })} /> 제미나이와 대화 사용
+              </label>
+              <label className="fld">하루 질문 횟수</label>
+              <input inputMode="numeric" value={f.ai_daily_limit || ''}
+                disabled={!f.ai_enabled}
+                onChange={(e) => setF({ ...f, ai_daily_limit: e.target.value.replace(/[^0-9]/g, '') })} />
+              <div className="hint">오늘 {mode.user.ai_used}회 사용했어요. 0으로 두면 사용할 수 없어요.</div>
+              <label className="fld" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={Boolean(f.ai_homework_guard)}
+                  disabled={!f.ai_enabled}
+                  onChange={(e) => setF({ ...f, ai_homework_guard: e.target.checked })} /> 숙제는 답 대신 힌트만
+              </label>
+              <div className="hint">
+                켜두면 숙제·독후감·일기·글짓기를 대신 해주지 않고 푸는 방법만 알려줘요.
+              </div>
             </>)}
             {mode.type === 'adjust' && (<>
               <label className="fld">포인트</label>

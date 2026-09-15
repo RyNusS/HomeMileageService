@@ -1,27 +1,34 @@
-// 가족 채팅 탭 (v1.18.0): 메신저형 UI, 3초 폴링, 위로 스크롤 시 이전 100개, 사진(리사이즈) 전송
+// 채팅 탭 (v1.20.0): 방 두 개 - 가족 공용 방 / 나만 보는 AI 방(제미나이)
+//   v1.18.0 의 메신저형 UI·3초 폴링·사진 전송은 그대로, 상단에 방 전환 칩을 얹었다.
 import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react';
 import { api, getToken, t } from '../api.js';
 import { toast } from '../toast.jsx';
 
 const POLL_MS = 3000;          // 채팅 화면이 보일 때 신규 메시지 확인 주기
-const UNREAD_MS = 15000;       // 다른 탭에서 미읽음 수 확인 주기
+const UNREAD_MS = 15000;       // 미읽음 수 확인 주기
 const MAX_TEXT = 500;
 const IMG_MAX = 1280;          // 업로드 전 긴 변 리사이즈(px)
+const THINKING_MAX_MS = 60000; // 이 시간까지 답이 없으면 '생각 중' 표시를 거둔다
+const AI_NAME = '제미나이';
 
 const fmtTime = (s) => new Date(s).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
 const fmtDay = (s) => new Date(s).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
 const dayKey = (s) => { const d = new Date(s); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
 
-// 푸시 탭(?tab=chat)으로 열렸으면 그 탭으로 시작
+// 푸시(?tab=chat[&room=ai])로 열렸으면 그 탭·그 방으로 시작
+let bootRoom = 'family';
 export function initialTab(fallback) {
   try {
-    const p = new URLSearchParams(window.location.search).get('tab');
-    if (p) window.history.replaceState(null, '', window.location.pathname);
-    return p === 'chat' ? 'chat' : fallback;
+    const sp = new URLSearchParams(window.location.search);
+    const tab = sp.get('tab');
+    if (sp.get('room') === 'ai') bootRoom = 'ai';
+    if (tab || sp.get('room')) window.history.replaceState(null, '', window.location.pathname);
+    return tab === 'chat' ? 'chat' : fallback;
   } catch { return fallback; }
 }
+export function initialRoom() { const r = bootRoom; bootRoom = 'family'; return r; }
 
-// 하단 탭 배지용 미읽음 수. 채팅 탭이 아닐 때만 주기 조회, 늘어나면 토스트 한 줄
+// 하단 탭 배지용 미읽음 수(가족방 + 내 AI 방). 채팅 탭이 아닐 때만 주기 조회
 export function useChatUnread(isChatTab) {
   const [count, setCount] = useState(0);
   const prev = useRef(0);
@@ -92,29 +99,43 @@ async function shrinkImage(file) {
 }
 
 export default function ChatTab({ me }) {
+  const [room, setRoom] = useState(() => initialRoom());
   const [msgs, setMsgs] = useState([]);
   const [hasMore, setHasMore] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  const [thinking, setThinking] = useState(false);
+  const [ai, setAi] = useState(null);              // /chat/ai/status 결과
+  const [badge, setBadge] = useState({ family: 0, ai: 0 });
   const [viewer, setViewer] = useState(null);      // 크게 보기 이미지 path
+  const [sheet, setSheet] = useState(null);        // AI 방 말풍선 길게 누르기 메뉴
   const listRef = useRef(null);
   const lastIdRef = useRef(0);
   const loadingOlder = useRef(false);
   const stickBottom = useRef(true);                 // 맨 아래 근처면 새 메시지 때 자동 스크롤
   const prependFix = useRef(null);                  // 이전 로딩 후 스크롤 위치 보정
+  const thinkingTimer = useRef(null);
   const cameraRef = useRef(null);
   const albumRef = useRef(null);
   const taRef = useRef(null);
   const isParent = me.role === 'parent' || me.role === 'super_admin';
+  const isAi = room === 'ai';
+  const qs = isAi ? '&room=ai' : '';
 
   const scrollBottom = useCallback(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, []);
 
+  const stopThinking = useCallback(() => {
+    setThinking(false);
+    if (thinkingTimer.current) { clearTimeout(thinkingTimer.current); thinkingTimer.current = null; }
+  }, []);
+
   const merge = useCallback((rows, deleted) => {
     if (!rows.length && !(deleted && deleted.length)) return;
+    if (rows.some((r) => r.is_ai)) stopThinking();
     setMsgs((cur) => {
       const ids = new Set(cur.map((m) => m.id));
       let next = cur.concat(rows.filter((r) => !ids.has(r.id)));
@@ -125,22 +146,48 @@ export default function ChatTab({ me }) {
       return next;
     });
     if (rows.length) lastIdRef.current = Math.max(lastIdRef.current, rows[rows.length - 1].id);
-  }, []);
+  }, [stopThinking]);
 
-  // 최초 로드
+  // AI 사용 가능 여부·남은 횟수
+  const refreshAi = useCallback(async () => {
+    try { setAi(await api('GET', '/api/chat/ai/status')); } catch { setAi(null); }
+  }, []);
+  useEffect(() => { refreshAi(); }, [refreshAi]);
+
+  // 방 전환 칩의 점 표시용 (지금 보고 있는 방은 읽음 처리되어 0이 된다)
   useEffect(() => {
     let alive = true;
+    const check = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const r = await api('GET', '/api/chat/unread');
+        if (alive && r) setBadge({ family: r.family || 0, ai: r.ai || 0 });
+      } catch { /* 조용히 */ }
+    };
+    check();
+    const iv = setInterval(check, UNREAD_MS);
+    return () => { alive = false; clearInterval(iv); };
+  }, [room]);
+
+  // 방이 바뀌면 처음부터 다시 로드
+  useEffect(() => {
+    let alive = true;
+    setLoaded(false); setMsgs([]); setHasMore(false); lastIdRef.current = 0;
+    stickBottom.current = true;
+    stopThinking();
     (async () => {
       try {
-        const r = await api('GET', '/api/chat/messages?active=1');
+        const r = await api('GET', `/api/chat/messages?active=1${qs}`);
         if (!alive || !r) return;
         setMsgs(r.rows); setHasMore(r.has_more);
         if (r.rows.length) lastIdRef.current = r.rows[r.rows.length - 1].id;
-      } catch (ex) { toast(t(ex.message), 'error'); }
+      } catch (ex) {
+        if (alive) toast(t(ex.message), 'error');
+      }
       if (alive) setLoaded(true);
     })();
     return () => { alive = false; };
-  }, []);
+  }, [room, qs, stopThinking]);
   useLayoutEffect(() => { if (loaded) scrollBottom(); }, [loaded, scrollBottom]);
 
   // 폴링: 화면이 보일 때만, 3초마다 (active=1 → 서버가 접속 중으로 보고 푸시 생략 + 읽음 처리)
@@ -151,7 +198,7 @@ export default function ChatTab({ me }) {
       if (running || document.visibilityState !== 'visible') return;
       running = true;
       try {
-        const r = await api('GET', `/api/chat/messages?since=${lastIdRef.current}&active=1`);
+        const r = await api('GET', `/api/chat/messages?since=${lastIdRef.current}&active=1${qs}`);
         if (alive && r) merge(r.rows, r.deleted);
       } catch { /* 다음 주기에 재시도 */ }
       running = false;
@@ -160,7 +207,9 @@ export default function ChatTab({ me }) {
     const onVis = () => { if (document.visibilityState === 'visible') poll(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { alive = false; clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
-  }, [loaded, merge]);
+  }, [loaded, merge, qs]);
+
+  useEffect(() => () => { if (thinkingTimer.current) clearTimeout(thinkingTimer.current); }, []);
 
   // 새 메시지가 붙었을 때: 아래쪽을 보고 있었으면 따라 내려간다 / 이전 로딩이면 위치 보정
   useLayoutEffect(() => {
@@ -172,13 +221,13 @@ export default function ChatTab({ me }) {
     } else if (stickBottom.current) {
       scrollBottom();
     }
-  }, [msgs, scrollBottom]);
+  }, [msgs, thinking, scrollBottom]);
 
   const loadOlder = useCallback(async () => {
     if (loadingOlder.current || !hasMore || !msgs.length) return;
     loadingOlder.current = true;
     try {
-      const r = await api('GET', `/api/chat/messages?before=${msgs[0].id}`);
+      const r = await api('GET', `/api/chat/messages?before=${msgs[0].id}${qs}`);
       if (r) {
         prependFix.current = listRef.current ? listRef.current.scrollHeight : 0;
         setHasMore(r.has_more);
@@ -189,7 +238,7 @@ export default function ChatTab({ me }) {
       }
     } catch { /* 스크롤 시 재시도 */ }
     loadingOlder.current = false;
-  }, [hasMore, msgs]);
+  }, [hasMore, msgs, qs]);
 
   const onScroll = () => {
     const el = listRef.current;
@@ -203,25 +252,45 @@ export default function ChatTab({ me }) {
     if (!content || busy) return;
     setBusy(true);
     try {
-      const m = await api('POST', '/api/chat/messages', { content });
+      const m = await api('POST', `/api/chat/messages?room=${room}`, { content });
       setText('');
       if (taRef.current) taRef.current.style.height = 'auto';
       stickBottom.current = true;
       merge([m]);
-    } catch (ex) { toast(t(ex.message), 'error'); }
+      if (m.ai_skipped) {
+        toast(m.ai_skipped === 'ai_daily_limit'
+          ? `오늘 ${AI_NAME}와 나눌 수 있는 대화를 다 썼어요`
+          : `${AI_NAME}를 부를 수 없어요`, 'error');
+      }
+      if (isAi || m.ai_called) {
+        setThinking(true);
+        if (thinkingTimer.current) clearTimeout(thinkingTimer.current);
+        thinkingTimer.current = setTimeout(() => setThinking(false), THINKING_MAX_MS);
+        if (m.ai_usage) {
+          setAi((cur) => (cur ? {
+            ...cur,
+            used: m.ai_usage.used,
+            remaining: Math.max(0, m.ai_usage.limit - m.ai_usage.used),
+          } : cur));
+        }
+      }
+    } catch (ex) {
+      toast(t(ex.message), 'error');
+      if (isAi) refreshAi();
+    }
     setBusy(false);
   };
 
   const sendPhoto = async (e) => {
     const file = (e.target.files || [])[0];
     e.target.value = '';
-    if (!file || busy) return;
+    if (!file || busy || isAi) return;
     setBusy(true);
     try {
       const fd = new FormData();
       fd.append('content', text.trim());
       fd.append('photo', await shrinkImage(file));
-      const m = await api('POST', '/api/chat/messages', fd);
+      const m = await api('POST', '/api/chat/messages?room=family', fd);
       setText('');
       stickBottom.current = true;
       merge([m]);
@@ -229,16 +298,24 @@ export default function ChatTab({ me }) {
     setBusy(false);
   };
 
+  const share = async (m) => {
+    try {
+      await api('POST', `/api/chat/messages/${m.id}/share`);
+      toast('가족방에 공유했어요 💬');
+    } catch (ex) { toast(t(ex.message), 'error'); }
+  };
+
   const remove = async (m) => {
     if (m.deleted) return;
-    if (m.user_id !== me.id && !isParent) return;
+    const canDelete = isAi ? true : (m.user_id === me.id || isParent);
+    if (!canDelete) return;
     if (!window.confirm('이 메시지를 삭제할까요?')) return;
     try {
       await api('DELETE', `/api/chat/messages/${m.id}`);
       merge([], [m.id]);
     } catch (ex) { toast(t(ex.message), 'error'); }
   };
-  // 삭제는 말풍선을 길게 누르면(contextmenu) - 본인 메시지, 부모는 전체
+  // 삭제는 말풍선을 길게 누르면(contextmenu) - 본인 메시지, 부모는 가족방 전체
 
   const onInput = (e) => {
     setText(e.target.value.slice(0, MAX_TEXT));
@@ -247,26 +324,45 @@ export default function ChatTab({ me }) {
     ta.style.height = `${Math.min(ta.scrollHeight, 110)}px`;
   };
 
+  // 기본 모델 한도가 차서 예비 모델이 답한 말풍선인지 (말투·품질이 달라져 표시해 준다)
+  const isBackup = (model) => !!(model && ai && ai.model && model !== ai.model);
+
   // 렌더링: 날짜 구분선 + 같은 사람 연속 메시지는 이름 생략
   const items = [];
-  let prevDay = null; let prevUser = null;
+  let prevDay = null; let prevWho = null;
   for (const m of msgs) {
     const dk = dayKey(m.created_at);
     if (dk !== prevDay) {
       items.push(<div className="chat-day" key={`d${dk}`}><span>{fmtDay(m.created_at)}</span></div>);
-      prevDay = dk; prevUser = null;
+      prevDay = dk; prevWho = null;
     }
-    const mine = m.user_id === me.id;
-    const showName = !mine && m.user_id !== prevUser;
-    prevUser = m.user_id;
+    // AI 답변은 질문한 사람의 id 로 저장되므로 is_ai 를 먼저 본다
+    const mine = !m.is_ai && m.user_id === me.id;
+    const who = m.is_ai ? 'ai' : m.user_id;
+    const showName = !mine && who !== prevWho;
+    prevWho = who;
     items.push(
       <div className={`chat-row ${mine ? 'mine' : ''}`} key={m.id}>
         <div className="chat-col">
-          {showName && <div className="chat-name">{m.user_name}</div>}
+          {m.shared && !m.is_ai && (
+            <div className="chat-shared">🔗 {AI_NAME}와의 대화에서 공유</div>
+          )}
+          {showName && (
+            <div className={`chat-name ${m.is_ai ? 'ai' : ''}`}>
+              {m.is_ai ? `🤖 ${AI_NAME}` : m.user_name}
+              {m.is_ai && isBackup(m.ai_model) && (
+                <span className="chat-backup" title={m.ai_model}>예비 모델</span>
+              )}
+            </div>
+          )}
           <div className="chat-line">
             {mine && <span className="chat-time">{fmtTime(m.created_at)}</span>}
-            <div className={`chat-bubble ${m.deleted ? 'deleted' : ''} ${m.kind === 'photo' && !m.deleted ? 'photo' : ''}`}
-              onContextMenu={(e) => { e.preventDefault(); remove(m); }}>
+            <div className={`chat-bubble ${m.deleted ? 'deleted' : ''} ${m.is_ai ? 'ai' : ''} ${m.kind === 'photo' && !m.deleted ? 'photo' : ''}`}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                if (m.deleted) return;
+                if (isAi) setSheet(m); else remove(m);
+              }}>
               {m.deleted ? '삭제된 메시지예요' : (<>
                 {m.image && <AuthImg path={m.image} className="chat-img" alt="사진" onClick={() => setViewer(m.image)} />}
                 {m.content && <div className="chat-text">{m.content}</div>}
@@ -279,21 +375,83 @@ export default function ChatTab({ me }) {
     );
   }
 
+  const aiOff = isAi && ai && !ai.available;
+  const aiEmpty = isAi && ai && ai.available && ai.remaining <= 0;
+  const canSend = !busy && !!text.trim() && !aiOff && !aiEmpty;
+
   return (
     <div className="chat-wrap">
+      <div className="chat-rooms">
+        <button className={`chat-room-chip ${!isAi ? 'on' : ''}`} onClick={() => setRoom('family')}>
+          👨‍👩‍👧 가족
+          {!!badge.family && isAi && <span className="chat-room-dot" />}
+        </button>
+        <button className={`chat-room-chip ${isAi ? 'on' : ''}`} onClick={() => setRoom('ai')}>
+          🤖 {AI_NAME}
+          {!!badge.ai && !isAi && <span className="chat-room-dot" />}
+        </button>
+      </div>
+
       <div className="chat-list" ref={listRef} onScroll={onScroll}>
         {hasMore && <div className="chat-more">↑ 위로 올리면 이전 대화를 불러와요</div>}
-        {loaded && !msgs.length && <div className="notice">아직 대화가 없어요. 첫 메시지를 보내 보세요!</div>}
+        {loaded && !msgs.length && !isAi && (
+          <div className="notice">아직 대화가 없어요. 첫 메시지를 보내 보세요!</div>
+        )}
+        {loaded && !msgs.length && isAi && !aiOff && (
+          <div className="notice">
+            {AI_NAME}에게 무엇이든 물어보세요. 이 방의 대화는 나만 볼 수 있어요.
+          </div>
+        )}
         {items}
+        {thinking && (
+          <div className="chat-row">
+            <div className="chat-col">
+              <div className="chat-line">
+                <div className="chat-bubble ai thinking"><span /><span /><span /></div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
+      {isAi && ai && ai.available && (
+        <div className="chat-quota">
+          오늘 남은 질문 {ai.remaining}회 <span className="dim">(하루 {ai.limit}회)</span>
+        </div>
+      )}
+      {aiOff && (
+        <div className="chat-quota warn">
+          {ai.configured ? '부모님이 AI 대화를 꺼두셨어요.' : 'AI 기능이 아직 준비되지 않았어요.'}
+        </div>
+      )}
+
       <div className="chat-input">
         <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={sendPhoto} />
         <input ref={albumRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={sendPhoto} />
-        <button className="chat-icon" disabled={busy} onClick={() => cameraRef.current.click()} title="촬영">📷</button>
-        <button className="chat-icon" disabled={busy} onClick={() => albumRef.current.click()} title="앨범">🖼️</button>
-        <textarea ref={taRef} rows={1} value={text} onChange={onInput} placeholder="메시지 입력" maxLength={MAX_TEXT} />
-        <button className="chat-send" disabled={busy || !text.trim()} onClick={sendText}>전송</button>
+        {!isAi && (
+          <>
+            <button className="chat-icon" disabled={busy} onClick={() => cameraRef.current.click()} title="촬영">📷</button>
+            <button className="chat-icon" disabled={busy} onClick={() => albumRef.current.click()} title="앨범">🖼️</button>
+          </>
+        )}
+        <textarea ref={taRef} rows={1} value={text} onChange={onInput}
+          placeholder={aiEmpty ? '오늘 대화를 다 썼어요' : (isAi ? `${AI_NAME}에게 물어보기` : '메시지 입력')}
+          disabled={aiOff || aiEmpty} maxLength={MAX_TEXT} />
+        <button className="chat-send" disabled={!canSend} onClick={sendText}>전송</button>
       </div>
+      {sheet && (
+        <div className="modal-bg" onClick={() => setSheet(null)}>
+          <div className="chat-sheet" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => { share(sheet); setSheet(null); }}>
+              👨‍👩‍👧 가족방에 공유하기
+            </button>
+            <button className="danger" onClick={() => { const m = sheet; setSheet(null); remove(m); }}>
+              🗑 삭제
+            </button>
+            <button className="cancel" onClick={() => setSheet(null)}>취소</button>
+          </div>
+        </div>
+      )}
       {viewer && (
         <div className="modal-bg photo" onClick={() => setViewer(null)}>
           <AuthImg path={viewer} className="proof-full" alt="사진 크게 보기" />

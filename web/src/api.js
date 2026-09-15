@@ -41,6 +41,12 @@ export const ERR_KO = {
   title_required: '제목을 입력해 주세요',
   comment_required: '댓글을 입력해 주세요',
   message_required: '메시지를 입력해 주세요',
+  nothing_to_share: '공유할 질문과 답변 한 쌍을 찾지 못했어요',
+  ai_disabled: '부모님이 AI 대화를 꺼두셨어요',
+  ai_daily_limit: '오늘 AI와 나눌 수 있는 대화를 다 썼어요',
+  ai_unavailable: 'AI 기능이 아직 준비되지 않았어요',
+  bad_ai_limit: '하루 질문 횟수는 0~500 사이로 입력해 주세요',
+  nothing_to_update: '변경할 내용이 없어요',
   forbidden: '권한이 없어요',
   not_found: '이미 삭제되었거나 찾을 수 없어요',
 };

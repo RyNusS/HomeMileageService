@@ -4,16 +4,61 @@ import { hashSecret } from '../hash.js';
 import { pushToUser } from '../push.js';
 
 export async function userRoutes(app) {
-  // list family members with balances
+  // list family members with balances (+ AI 설정·오늘 사용량, v1.20.0)
   app.get('/users', { onRequest: app.authRequired }, async (req) => {
     const { rows } = await q(
-      `SELECT id, login_id, name, role, balance_cache, active
-       FROM app_user WHERE family_id = $1 AND active ORDER BY role DESC, id`,
+      `SELECT u.id, u.login_id, u.name, u.role, u.balance_cache, u.active,
+              u.ai_enabled, u.ai_daily_limit, u.ai_homework_guard,
+              COALESCE(a.count, 0) AS ai_used
+         FROM app_user u
+         LEFT JOIN ai_usage a
+           ON a.user_id = u.id AND a.use_date = (now() AT TIME ZONE 'Asia/Seoul')::date
+        WHERE u.family_id = $1 AND u.active ORDER BY u.role DESC, u.id`,
       [req.user.family_id]);
     return rows.map((r) => ({
       id: Number(r.id), login_id: r.login_id, name: r.name, role: r.role,
       balance: r.balance_cache, active: r.active,
+      ai_enabled: r.ai_enabled,
+      ai_daily_limit: r.ai_daily_limit,
+      ai_homework_guard: r.ai_homework_guard,
+      ai_used: Number(r.ai_used),
     }));
+  });
+
+  // AI 채팅 설정 변경 (부모). 보낸 항목만 바꾼다.
+  //   ai_enabled        : AI 방 사용 여부
+  //   ai_daily_limit    : 하루 질문 횟수 (0~500)
+  //   ai_homework_guard : 숙제·독후감 등을 대신 해주지 않게 할지
+  app.patch('/users/:id/ai', { onRequest: app.parentOnly }, async (req, reply) => {
+    const b = req.body || {};
+    const sets = []; const vals = [];
+    if (b.ai_enabled !== undefined) {
+      sets.push(`ai_enabled = $${sets.length + 1}`); vals.push(!!b.ai_enabled);
+    }
+    if (b.ai_daily_limit !== undefined) {
+      const n = Number(b.ai_daily_limit);
+      if (!Number.isInteger(n) || n < 0 || n > 500) {
+        return reply.code(400).send({ error: 'bad_ai_limit' });
+      }
+      sets.push(`ai_daily_limit = $${sets.length + 1}`); vals.push(n);
+    }
+    if (b.ai_homework_guard !== undefined) {
+      sets.push(`ai_homework_guard = $${sets.length + 1}`); vals.push(!!b.ai_homework_guard);
+    }
+    if (!sets.length) return reply.code(400).send({ error: 'nothing_to_update' });
+
+    vals.push(req.params.id, req.user.family_id);
+    const { rows } = await q(
+      `UPDATE app_user SET ${sets.join(', ')}
+        WHERE id = $${vals.length - 1} AND family_id = $${vals.length}
+        RETURNING id, ai_enabled, ai_daily_limit, ai_homework_guard`, vals);
+    if (!rows[0]) return reply.code(404).send({ error: 'not_found' });
+    return {
+      id: Number(rows[0].id),
+      ai_enabled: rows[0].ai_enabled,
+      ai_daily_limit: rows[0].ai_daily_limit,
+      ai_homework_guard: rows[0].ai_homework_guard,
+    };
   });
 
   // create child account
