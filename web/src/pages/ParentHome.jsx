@@ -417,10 +417,11 @@ function FamilyTab() {
               <label className="fld" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <input type="checkbox" style={{ width: 'auto' }} checked={Boolean(f.ai_homework_guard)}
                   disabled={!f.ai_enabled}
-                  onChange={(e) => setF({ ...f, ai_homework_guard: e.target.checked })} /> 숙제는 답 대신 힌트만
+                  onChange={(e) => setF({ ...f, ai_homework_guard: e.target.checked })} /> 숙제는 정답 대신 풀이 과정
               </label>
               <div className="hint">
-                켜두면 숙제·독후감·일기·글짓기를 대신 해주지 않고 푸는 방법만 알려줘요.
+                켜두면 정답은 알려주지 않고 푸는 과정을 단계별로 설명해요. 마지막 계산은 아이가 직접 하고,
+                아이가 답을 말하면 채점해 줍니다. 독후감·일기·글짓기는 대신 써주지 않아요.
               </div>
             </>)}
             {mode.type === 'adjust' && (<>

@@ -20,8 +20,8 @@
 const DEFAULT_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const DEFAULT_MODELS = 'gemini-3.5-flash,gemini-3.1-flash-lite';
 
-const MAX_REPLY = 900;            // 말풍선에 넣을 최대 글자수
-const MAX_OUTPUT_TOKENS = 800;
+const MAX_REPLY = 1400;           // 말풍선에 넣을 최대 글자수 (단계별 풀이가 들어간다)
+const MAX_OUTPUT_TOKENS = 1200;   // 사진 속 문제 풀이는 설명이 길어진다
 const TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS || 30000);
 
 export const AI_NAME = '제미나이';
@@ -75,24 +75,37 @@ function systemPrompt({ userName, homeworkGuard, groupChat }) {
   }
   if (homeworkGuard) {
     lines.push(
-      '- 숙제, 시험 문제, 독후감, 일기, 글짓기처럼 아이가 직접 해야 하는 과제는 결과물을 대신 만들어 주지 마.',
-      '  대신 어떻게 하면 되는지 힌트와 방향만 알려주고, 아이가 직접 해온 것을 봐주겠다고 말해.',
+      '- 숙제나 시험 문제로 보이면 최종 정답(답이 되는 숫자나 답 번호)은 말하지 마.',
+      '  대신 푸는 과정을 단계별로 아주 자세히 설명해. 어떤 식을 세우는지, 왜 그렇게 세우는지,',
+      '  어떤 순서로 계산하는지를 하나씩 짚어 주고, 마지막 계산과 답 쓰기는 아이가 직접 하도록 남겨 둬.',
+      '  "답이 뭐야", "정답 몇 번이야" 처럼 답만 물어도 마찬가지야. 답 대신 풀이를 자세히 알려 줘.',
+      '  아이가 자기가 구한 답을 말하면 맞는지 채점해 주고, 틀렸으면 어디서 어긋났는지 짚어 줘.',
+      '- 독후감, 일기, 글짓기처럼 직접 써야 하는 글은 대신 써 주지 마.',
+      '  어떻게 쓰면 좋을지 방법과 짜임만 알려 주고, 아이가 써 온 글은 다듬는 것을 도와 줘.',
     );
   }
   return lines.filter((l) => l !== '').join('\n');
 }
 
 // Gemini contents 는 user 로 시작해야 하고, 같은 role 이 연달아 오면 합치는 편이 안전하다.
+//   history 항목의 image = { mime, data(base64) } 가 있으면 그 턴에 사진을 함께 싣는다.
 function toContents(history) {
   const out = [];
   for (const m of history) {
     const text = String(m.text || '').trim();
-    if (!text) continue;
+    if (!text && !m.image) continue;
     const role = m.is_ai ? 'model' : 'user';
     if (!out.length && role === 'model') continue;          // 앞쪽 model 턴은 버린다
     const last = out[out.length - 1];
-    if (last && last.role === role) last.parts[0].text += `\n${text}`;
-    else out.push({ role, parts: [{ text }] });
+    if (last && last.role === role && !m.image) {
+      // 사진 없는 같은 역할의 연속 발화는 한 덩어리로 합친다
+      const first = last.parts.find((p) => p.text !== undefined);
+      if (first) { first.text += `\n${text}`; continue; }
+    }
+    const parts = [];
+    if (text) parts.push({ text });
+    if (m.image) parts.push({ inline_data: { mime_type: m.image.mime, data: m.image.data } });
+    out.push({ role, parts });
   }
   return out;
 }

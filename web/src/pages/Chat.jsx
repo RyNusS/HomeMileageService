@@ -284,16 +284,34 @@ export default function ChatTab({ me }) {
   const sendPhoto = async (e) => {
     const file = (e.target.files || [])[0];
     e.target.value = '';
-    if (!file || busy || isAi) return;
+    if (!file || busy) return;
     setBusy(true);
     try {
       const fd = new FormData();
       fd.append('content', text.trim());
       fd.append('photo', await shrinkImage(file));
-      const m = await api('POST', '/api/chat/messages?room=family', fd);
+      const m = await api('POST', `/api/chat/messages?room=${room}`, fd);
       setText('');
+      if (taRef.current) taRef.current.style.height = 'auto';
       stickBottom.current = true;
       merge([m]);
+      if (m.ai_skipped) {
+        toast(m.ai_skipped === 'ai_daily_limit'
+          ? `오늘 ${AI_NAME}와 나눌 수 있는 대화를 다 썼어요`
+          : `${AI_NAME}를 부를 수 없어요`, 'error');
+      }
+      if (isAi || m.ai_called) {
+        setThinking(true);
+        if (thinkingTimer.current) clearTimeout(thinkingTimer.current);
+        thinkingTimer.current = setTimeout(() => setThinking(false), THINKING_MAX_MS);
+        if (m.ai_usage) {
+          setAi((cur) => (cur ? {
+            ...cur,
+            used: m.ai_usage.used,
+            remaining: Math.max(0, m.ai_usage.limit - m.ai_usage.used),
+          } : cur));
+        }
+      }
     } catch (ex) { toast(t(ex.message), 'error'); }
     setBusy(false);
   };
@@ -399,7 +417,8 @@ export default function ChatTab({ me }) {
         )}
         {loaded && !msgs.length && isAi && !aiOff && (
           <div className="notice">
-            {AI_NAME}에게 무엇이든 물어보세요. 이 방의 대화는 나만 볼 수 있어요.
+            {AI_NAME}에게 무엇이든 물어보세요. 모르는 문제는 사진을 찍어 보여줘도 돼요.
+            <br />이 방의 대화는 나만 볼 수 있어요.
           </div>
         )}
         {items}
@@ -428,14 +447,12 @@ export default function ChatTab({ me }) {
       <div className="chat-input">
         <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={sendPhoto} />
         <input ref={albumRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={sendPhoto} />
-        {!isAi && (
-          <>
-            <button className="chat-icon" disabled={busy} onClick={() => cameraRef.current.click()} title="촬영">📷</button>
-            <button className="chat-icon" disabled={busy} onClick={() => albumRef.current.click()} title="앨범">🖼️</button>
-          </>
-        )}
+        <button className="chat-icon" disabled={busy || aiOff || aiEmpty}
+          onClick={() => cameraRef.current.click()} title="촬영">📷</button>
+        <button className="chat-icon" disabled={busy || aiOff || aiEmpty}
+          onClick={() => albumRef.current.click()} title="앨범">🖼️</button>
         <textarea ref={taRef} rows={1} value={text} onChange={onInput}
-          placeholder={aiEmpty ? '오늘 대화를 다 썼어요' : (isAi ? `${AI_NAME}에게 물어보기` : '메시지 입력')}
+          placeholder={aiEmpty ? '오늘 대화를 다 썼어요' : (isAi ? `${AI_NAME}에게 물어보기 (사진도 가능)` : '메시지 입력')}
           disabled={aiOff || aiEmpty} maxLength={MAX_TEXT} />
         <button className="chat-send" disabled={!canSend} onClick={sendText}>전송</button>
       </div>

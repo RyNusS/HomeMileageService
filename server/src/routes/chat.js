@@ -17,6 +17,8 @@ const ACTIVE_WINDOW_SEC = 10;     // 이 시간 안에 그 방을 보고 있던 
 const PUSH_BODY_MAX = 40;
 const AI_CONTEXT = 20;            // AI 방에서 모델에 넘기는 직전 메시지 수
 const FAMILY_CONTEXT = 10;        // 가족방 호출에서 넘기는 직전 메시지 수
+const MAX_IMAGES = 2;             // 모델에 함께 보내는 사진 수 (최근 것부터). 토큰·비용 상한
+const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 
 // 가족방에서 제미나이를 부르는 말.
 //   이름 뒤에 쉼표/구두점이나 공백이 와야 한다 - "제미나이가 좋대" 같은 문장은 부르는 게 아니다.
@@ -68,6 +70,23 @@ async function ensureRoom(familyId, kind, userId) {
 }
 
 const roomKind = (req) => (req.query.room === 'ai' ? 'ai' : 'family');
+
+// 업로드된 사진을 모델에 실어 보낼 형태로 읽는다. 없거나 너무 크면 null.
+async function readImage(uploadDir, name) {
+  try {
+    const full = path.join(uploadDir, path.basename(name));
+    const stat = await fs.promises.stat(full);
+    if (!stat.isFile() || stat.size > MAX_IMAGE_BYTES) return null;
+    const ext = path.extname(full).toLowerCase();
+    const mime = ext === '.png' ? 'image/png'
+      : ext === '.webp' ? 'image/webp'
+        : ext === '.heic' || ext === '.heif' ? 'image/heic'
+          : 'image/jpeg';
+    return { mime, data: (await fs.promises.readFile(full)).toString('base64') };
+  } catch {
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------- AI 설정·한도
 
@@ -148,15 +167,27 @@ export async function chatRoutes(app, opts) {
       let failed = false;
       try {
         const { rows } = await q(
-          `SELECT m.content, m.is_ai, u.name FROM chat_message m JOIN app_user u ON u.id = m.user_id
-            WHERE m.room_id = $1 AND m.deleted_at IS NULL AND m.kind = 'text' AND m.content <> ''
+          `SELECT m.content, m.is_ai, m.image, u.name FROM chat_message m JOIN app_user u ON u.id = m.user_id
+            WHERE m.room_id = $1 AND m.deleted_at IS NULL AND (m.content <> '' OR m.image IS NOT NULL)
             ORDER BY m.id DESC LIMIT $2`,
           [roomId, groupChat ? FAMILY_CONTEXT : AI_CONTEXT]);
+        // 사진은 최근 것 몇 장만 실어 보낸다 (나머지는 "[사진]" 으로만 남긴다)
+        let budget = MAX_IMAGES;
+        for (const r of rows) {                      // rows 는 최신순
+          if (!r.image) continue;
+          if (budget > 0 && (r.attached = await readImage(uploadDir, r.image))) budget -= 1;
+        }
         // 가족방은 여러 사람이 섞이므로 누가 한 말인지 붙여 준다
-        const history = rows.reverse().map((r) => ({
-          text: groupChat && !r.is_ai ? `${r.name}: ${r.content}` : r.content,
-          is_ai: r.is_ai,
-        }));
+        const history = rows.reverse().map((r) => {
+          let text = r.content || '';
+          if (r.image && !r.attached) text = text ? `[사진] ${text}` : '[사진]';
+          if (!text && r.image) text = '이 사진에 대해 알려 주세요.';
+          return {
+            text: groupChat && !r.is_ai && text ? `${r.name}: ${text}` : text,
+            is_ai: r.is_ai,
+            image: r.attached || null,
+          };
+        });
         const out = await askGemini({
           history, userName: askerName, homeworkGuard, groupChat, log,
         });
@@ -337,7 +368,7 @@ export async function chatRoutes(app, opts) {
     if (req.isMultipart()) {
       for await (const part of req.parts()) {
         if (part.type === 'file' && part.fieldname === 'photo') {
-          if (image || kind === 'ai') { await part.toBuffer(); continue; }
+          if (image) { await part.toBuffer(); continue; }
           const ext = (path.extname(part.filename || '') || '.jpg').toLowerCase().slice(0, 8);
           const fname = `chat_${Date.now()}_${randomBytes(6).toString('hex')}${ext}`;
           await fs.promises.writeFile(path.join(uploadDir, fname), await part.toBuffer());
@@ -350,7 +381,6 @@ export async function chatRoutes(app, opts) {
       content = String((req.body && req.body.content) || '').trim().slice(0, MAX_TEXT);
     }
 
-    if (kind === 'ai' && !content) return reply.code(400).send({ error: 'message_required' });
     if (!content && !image) return reply.code(400).send({ error: 'message_required' });
 
     // AI 방은 보내기 전에 사용 가능 여부와 오늘 남은 횟수를 확인한다
