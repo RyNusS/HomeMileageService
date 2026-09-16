@@ -150,22 +150,6 @@ async function consumeQuota(userId) {
   }
 }
 
-// 실패하거나 버린 답변의 오늘 사용 횟수를 돌려준다
-async function refundQuota(userId) {
-  await q(
-    `UPDATE ai_usage SET count = GREATEST(0, count - 1)
-      WHERE user_id = $1 AND use_date = (now() AT TIME ZONE 'Asia/Seoul')::date`,
-    [userId]).catch(() => {});
-}
-
-// 같은 사람이 답을 기다리는 동안 말을 더 붙이는 일이 잦다.
-//   (사진 한 장 → "허벅지 옆 피부야" → "왜 이러지?" = 사람 입장에선 질문 하나)
-//   메시지마다 답하면 거의 같은 답이 여러 번 쌓이고 사용 횟수도 그만큼 깎인다.
-//   그래서 (방, 물어본 사람)별로 번호를 매겨 두고, 답이 만들어졌을 때 번호가 이미 밀렸으면 버린다.
-//   버려도 맥락은 안 끊긴다 — 나중 호출이 앞의 말까지 history 에 담아 한 번에 답하기 때문이다.
-//   가족방에서 다른 사람이 동시에 물은 것까지 삼키지 않도록 사람 단위로 나눠 센다.
-const replyGen = new Map();
-
 export async function chatRoutes(app, opts) {
   const uploadDir = opts.uploadDir;
 
@@ -190,10 +174,6 @@ export async function chatRoutes(app, opts) {
   function scheduleReply({
     roomId, familyId, askerId, askerName, homeworkGuard, groupChat = false, log,
   }) {
-    const genKey = `${roomId}:${askerId}`;
-    const gen = (replyGen.get(genKey) || 0) + 1;
-    replyGen.set(genKey, gen);
-
     setImmediate(async () => {
       let text = AI_FALLBACK;
       let model = aiModel();
@@ -256,17 +236,13 @@ export async function chatRoutes(app, opts) {
         }
       }
 
-      // 이 답을 만드는 동안 같은 사람이 말을 더 붙였으면 이 답은 버린다 (마지막 호출이 몰아서 답한다)
-      const superseded = replyGen.get(genKey) !== gen;
-
-      // 못 받았거나 버리는 답은 오늘 사용 횟수를 돌려준다 (이어서 한 말 때문에 한도가 깎이면 안 된다)
-      if (failed || superseded) await refundQuota(askerId);
-
-      if (superseded) {
-        if (log) log.info({ roomId, askerId }, 'gemini reply superseded by a newer message');
-        return;
+      // 답을 못 받았으면 오늘 사용 횟수는 돌려준다 (실패로 한도를 깎지 않는다)
+      if (failed) {
+        await q(
+          `UPDATE ai_usage SET count = GREATEST(0, count - 1)
+            WHERE user_id = $1 AND use_date = (now() AT TIME ZONE 'Asia/Seoul')::date`,
+          [askerId]).catch(() => {});
       }
-      replyGen.delete(genKey);
 
       try {
         await q(
