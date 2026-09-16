@@ -307,10 +307,14 @@ function FamilyTab() {
 
   const close = () => { setMode(null); setF({}); };
 
+  // 하루 횟수 제한은 자녀를 위한 장치다. 부모·관리자는 횟수 제한 없이 쓴다 (서버와 같은 규칙)
+  const aiUnlimited = (u) => u.role === 'parent' || u.role === 'super_admin';
+
   // 구성원 줄에 보이는 AI 한 줄 요약
-  const aiSummary = (u) => (u.ai_enabled
-    ? `AI ${u.ai_used}/${u.ai_daily_limit}회`
-    : 'AI 꺼짐');
+  const aiSummary = (u) => {
+    if (!u.ai_enabled) return 'AI 꺼짐';
+    return aiUnlimited(u) ? `AI ${u.ai_used}회 (무제한)` : `AI ${u.ai_used}/${u.ai_daily_limit}회`;
+  };
 
   const openAi = (u) => {
     setMode({ type: 'ai', user: u });
@@ -342,8 +346,9 @@ function FamilyTab() {
       } else if (mode.type === 'ai') {
         await api('PATCH', `/api/users/${mode.user.id}/ai`, {
           ai_enabled: !!f.ai_enabled,
-          ai_daily_limit: Number(f.ai_daily_limit),
           ai_homework_guard: !!f.ai_homework_guard,
+          // 부모·관리자는 횟수 제한이 없으므로 한도 값 자체를 보내지 않는다
+          ...(aiUnlimited(mode.user) ? {} : { ai_daily_limit: Number(f.ai_daily_limit) }),
         });
         toast(`${mode.user.name}의 AI 설정을 저장했어요`);
       } else if (mode.type === 'adjust') {
@@ -365,19 +370,19 @@ function FamilyTab() {
         {users.map((u) => (
           <div className="row" key={u.id}>
             <div className="main">
-              <div className="name">{u.role === 'parent' ? '👤' : '🧒'} {u.name}</div>
+              <div className="name">{u.role === 'child' ? '🧒' : '👤'} {u.name}</div>
               <div className="meta">
                 @{u.login_id} · {u.balance.toLocaleString()}P · {aiSummary(u)}
               </div>
             </div>
-            {u.role === 'child' && (
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button className="small ghost" onClick={() => openAi(u)}>AI</button>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className="small ghost" onClick={() => openAi(u)}>AI</button>
+              {u.role === 'child' && (<>
                 <button className="small ghost" onClick={() => { setMode({ type: 'pin', user: u }); setF({}); }}>PIN</button>
                 <button className="small ghost" onClick={() => { setMode({ type: 'adjust', user: u }); setF({}); }}>지급/차감</button>
                 <button className="small danger" onClick={() => removeChild(u)}>삭제</button>
-              </div>
-            )}
+              </>)}
+            </div>
           </div>
         ))}
       </div>
@@ -410,10 +415,17 @@ function FamilyTab() {
                   onChange={(e) => setF({ ...f, ai_enabled: e.target.checked })} /> 제미나이와 대화 사용
               </label>
               <label className="fld">하루 질문 횟수</label>
-              <input inputMode="numeric" value={f.ai_daily_limit || ''}
-                disabled={!f.ai_enabled}
-                onChange={(e) => setF({ ...f, ai_daily_limit: e.target.value.replace(/[^0-9]/g, '') })} />
-              <div className="hint">오늘 {mode.user.ai_used}회 사용했어요. 0으로 두면 사용할 수 없어요.</div>
+              {aiUnlimited(mode.user) ? (<>
+                <input value="무제한" readOnly disabled />
+                <div className="hint">
+                  오늘 {mode.user.ai_used}회 물어봤어요. 부모·관리자 계정은 횟수 제한이 없어요.
+                </div>
+              </>) : (<>
+                <input inputMode="numeric" value={f.ai_daily_limit || ''}
+                  disabled={!f.ai_enabled}
+                  onChange={(e) => setF({ ...f, ai_daily_limit: e.target.value.replace(/[^0-9]/g, '') })} />
+                <div className="hint">오늘 {mode.user.ai_used}회 사용했어요. 0으로 두면 사용할 수 없어요.</div>
+              </>)}
               <label className="fld" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <input type="checkbox" style={{ width: 'auto' }} checked={Boolean(f.ai_homework_guard)}
                   disabled={!f.ai_enabled}
