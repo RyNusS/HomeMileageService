@@ -90,9 +90,14 @@ async function readImage(uploadDir, name) {
 
 // ---------------------------------------------------------------- AI 설정·한도
 
+// 하루 횟수 제한은 자녀를 위한 장치다. 부모·관리자 계정은 한도를 걸지 않는다.
+//   (사용량 자체는 계속 기록해 두어 나중에 실사용량을 볼 수 있게 한다)
+const UNLIMITED_ROLES = new Set(['parent', 'super_admin']);
+const isUnlimited = (role) => UNLIMITED_ROLES.has(role);
+
 async function aiSettings(userId) {
   const { rows } = await q(
-    `SELECT u.ai_enabled, u.ai_daily_limit, u.ai_homework_guard, u.name,
+    `SELECT u.ai_enabled, u.ai_daily_limit, u.ai_homework_guard, u.name, u.role,
             COALESCE(a.count, 0) AS used
        FROM app_user u
        LEFT JOIN ai_usage a
@@ -104,6 +109,7 @@ async function aiSettings(userId) {
     enabled: r.ai_enabled,
     limit: r.ai_daily_limit,
     used: Number(r.used),
+    unlimited: isUnlimited(r.role),
     homeworkGuard: r.ai_homework_guard,
     name: r.name,
   };
@@ -114,21 +120,28 @@ async function consumeQuota(userId) {
   try {
     return await tx(async (c) => {
       const s = (await c.query(
-        `SELECT ai_enabled, ai_daily_limit, ai_homework_guard, name
+        `SELECT ai_enabled, ai_daily_limit, ai_homework_guard, name, role
            FROM app_user WHERE id = $1 FOR UPDATE`, [userId])).rows[0];
       if (!s) throw Object.assign(new Error('no_user'), { hms: 'not_found' });
       if (!s.ai_enabled) throw Object.assign(new Error('off'), { hms: 'ai_disabled' });
+      const unlimited = isUnlimited(s.role);
       const r = await c.query(
         `INSERT INTO ai_usage (user_id, use_date, count)
          VALUES ($1, (now() AT TIME ZONE 'Asia/Seoul')::date, 1)
          ON CONFLICT (user_id, use_date) DO UPDATE SET count = ai_usage.count + 1
          RETURNING count`, [userId]);
       const used = Number(r.rows[0].count);
-      if (used > s.ai_daily_limit) {
+      // 부모·관리자는 세어만 두고 막지 않는다
+      if (!unlimited && used > s.ai_daily_limit) {
         throw Object.assign(new Error('limit'), { hms: 'ai_daily_limit', limit: s.ai_daily_limit });
       }
       return {
-        ok: true, used, limit: s.ai_daily_limit, homeworkGuard: s.ai_homework_guard, name: s.name,
+        ok: true,
+        used,
+        limit: s.ai_daily_limit,
+        unlimited,
+        homeworkGuard: s.ai_homework_guard,
+        name: s.name,
       };
     });
   } catch (err) {
@@ -274,7 +287,8 @@ export async function chatRoutes(app, opts) {
       configured: aiReady(),
       used: s.used,
       limit: s.limit,
-      remaining: Math.max(0, s.limit - s.used),
+      unlimited: s.unlimited,
+      remaining: s.unlimited ? null : Math.max(0, s.limit - s.used),
       name: AI_NAME,
       model: aiModel(),
     };
@@ -471,7 +485,7 @@ export async function chatRoutes(app, opts) {
       created_at: rows[0].created_at,
       deleted: false,
     };
-    if (quota) out.ai_usage = { used: quota.used, limit: quota.limit };
+    if (quota) out.ai_usage = { used: quota.used, limit: quota.limit, unlimited: !!quota.unlimited };
     if (aiSkipped) out.ai_skipped = aiSkipped;       // 불렀지만 한도·설정 때문에 답을 못 하는 경우
     if (kind === 'family' && !aiSkipped && quota) out.ai_called = true;
     return out;

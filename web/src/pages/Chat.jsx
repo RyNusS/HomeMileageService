@@ -270,7 +270,9 @@ export default function ChatTab({ me }) {
           setAi((cur) => (cur ? {
             ...cur,
             used: m.ai_usage.used,
-            remaining: Math.max(0, m.ai_usage.limit - m.ai_usage.used),
+            unlimited: !!m.ai_usage.unlimited,
+            remaining: m.ai_usage.unlimited
+              ? null : Math.max(0, m.ai_usage.limit - m.ai_usage.used),
           } : cur));
         }
       }
@@ -308,7 +310,9 @@ export default function ChatTab({ me }) {
           setAi((cur) => (cur ? {
             ...cur,
             used: m.ai_usage.used,
-            remaining: Math.max(0, m.ai_usage.limit - m.ai_usage.used),
+            unlimited: !!m.ai_usage.unlimited,
+            remaining: m.ai_usage.unlimited
+              ? null : Math.max(0, m.ai_usage.limit - m.ai_usage.used),
           } : cur));
         }
       }
@@ -394,7 +398,7 @@ export default function ChatTab({ me }) {
   }
 
   const aiOff = isAi && ai && !ai.available;
-  const aiEmpty = isAi && ai && ai.available && ai.remaining <= 0;
+  const aiEmpty = isAi && ai && ai.available && !ai.unlimited && ai.remaining <= 0;
   const canSend = !busy && !!text.trim() && !aiOff && !aiEmpty;
 
   return (
@@ -435,7 +439,9 @@ export default function ChatTab({ me }) {
 
       {isAi && ai && ai.available && (
         <div className="chat-quota">
-          오늘 남은 질문 {ai.remaining}회 <span className="dim">(하루 {ai.limit}회)</span>
+          {ai.unlimited
+            ? <>오늘 {ai.used}번 물어봤어요 <span className="dim">(횟수 제한 없음)</span></>
+            : <>오늘 남은 질문 {ai.remaining}회 <span className="dim">(하루 {ai.limit}회)</span></>}
         </div>
       )}
       {aiOff && (
