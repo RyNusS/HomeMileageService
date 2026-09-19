@@ -57,3 +57,27 @@ def sync_to_current() -> bool:
         return False
     install()
     return True
+
+
+SERIALIZE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize"
+
+
+def disable_startup_delay() -> bool:
+    """Windows 가 로그온 직후 '시작 프로그램' 실행을 일부러 늦추는 지연을 끈다 (현재 사용자만,
+    관리자 권한 불필요). 이미 꺼져 있으면 아무것도 하지 않는다. 바꿨으면 True."""
+    want = {"StartupDelayInMSec": 0, "WaitForIdleState": 0}
+    changed = False
+    k = winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, SERIALIZE_KEY, 0,
+                           winreg.KEY_QUERY_VALUE | winreg.KEY_SET_VALUE)
+    try:
+        for name, val in want.items():
+            try:
+                cur, _ = winreg.QueryValueEx(k, name)
+            except FileNotFoundError:
+                cur = None
+            if cur != val:
+                winreg.SetValueEx(k, name, 0, winreg.REG_DWORD, val)
+                changed = True
+    finally:
+        winreg.CloseKey(k)
+    return changed

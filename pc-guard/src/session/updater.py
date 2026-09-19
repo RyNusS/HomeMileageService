@@ -113,5 +113,34 @@ def cleanup_old(current_exe: str) -> None:
         pass
 
 
+def runtime_dir() -> Path:
+    """exe 실행 시 내부 파일을 풀어두는 폴더 (build.ps1 의 --runtime-tmpdir 과 같은 위치).
+    백신 제외 폴더(%LOCALAPPDATA%\\HMSGuard) 안이라 부팅 때 파일 검사로 느려지지 않는다."""
+    return install_dir() / "rt"
+
+
+def cleanup_runtime_dirs() -> None:
+    """강제 종료 등으로 남은 예전 압축 해제 폴더(_MEI*) 정리. 지금 쓰는 폴더와
+    다른 프로세스(워치독)가 쓰는 폴더는 잠겨 있어 지워지지 않으므로 그대로 둔다."""
+    import shutil
+
+    cur = getattr(sys, "_MEIPASS", None)
+    base = runtime_dir()
+    if not base.exists():
+        return
+    for p in base.glob("_MEI*"):
+        try:
+            if cur and p.resolve() == Path(cur).resolve():
+                continue
+            # 쓰고 있는 폴더는 이름 바꾸기가 실패한다 → 실행 중인 프로세스의 파일은 건드리지 않음
+            trash = p.with_name("_old" + p.name)
+            p.rename(trash)
+            shutil.rmtree(trash, ignore_errors=True)
+        except OSError:
+            pass
+    for p in base.glob("_old_MEI*"):  # 지난번에 지우다 남은 것
+        shutil.rmtree(p, ignore_errors=True)
+
+
 def frozen() -> bool:
     return bool(getattr(sys, "frozen", False))

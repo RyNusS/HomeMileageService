@@ -32,5 +32,14 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 .\dist\hms-guard.vX.Y.Z.exe --remove-autostart
 ```
 
+### 설치 시 참고
+
+- 서명 없는 exe 라 Windows 보안(Defender)이 트로이 목마로 **오진**할 수 있다. 자녀 PC에서
+  보호 기록 → 허용 후, 제외 폴더에 **가드 exe 폴더**와 **`%LOCALAPPDATA%\HMSGuard`** 를 추가한다.
+- 시작 속도(v1.1.0~): Windows 시작 프로그램 지연 해제(현재 사용자), 쓰지 않는 Tcl/Tk 데이터 제외
+  (`hms-guard.spec`), 압축 해제 위치를 제외 폴더(`%LOCALAPPDATA%\HMSGuard\rt`)로, 워치독은 20초 뒤 시작,
+  로그인 화면엔 이모지 미사용(첫 이모지 글꼴 대체 검색이 1초 이상 걸림).
+  측정(개발 PC, 창 표시까지): v1.0.0 약 6.3초 → v1.1.0 약 2.8초.
+
 > 우회 방지 한계: 자녀 계정을 Windows **표준 사용자**로 두는 것을 권장합니다.
 > (관리자 권한이면 작업 관리자 등으로 가드를 종료할 수 있습니다)

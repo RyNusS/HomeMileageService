@@ -47,7 +47,7 @@ from src.session import autostart, config, hms_client, updater, watchdog
 from src.session.hms_client import HmsError, HmsOffline
 
 APP_TITLE = "PC 사용 시간 관리"
-APP_VERSION = "v1.0.0"
+APP_VERSION = "v1.1.0"
 BG = "#0F172A"
 CARD = "#1E293B"
 FG = "#F1F5F9"
@@ -60,6 +60,7 @@ OK = "#10B981"
 WARN_AT_MIN = (10, 5, 1)
 SYNC_EVERY_TICKS = 5             # 세션 중 설정 동기화 주기 (차감 주기 × N)
 UPDATE_CHECK_SEC = 30 * 60       # 자동 업데이트 확인 주기
+WATCHDOG_START_MS = 20 * 1000    # 워치독은 잠금 화면이 뜬 뒤 늦게 시작 (부팅 직후 부하 분산)
 
 
 def fmt_end(dt: datetime) -> str:
@@ -117,9 +118,18 @@ class GuardApp:
             watchdog.mark_running()
 
         self._resume_or_login()
-        self.root.after(3000, self._watchdog_tick)
+        self.root.after(300, self._warm_fonts)
+        # 워치독은 화면이 뜬 뒤 시작 — 같은 exe 를 하나 더 띄우는 일이라 부팅 직후엔 미룬다
+        self.root.after(WATCHDOG_START_MS, self._watchdog_tick)
         if updater.frozen() and not self.windowed:
             self.root.after(20 * 1000, self._update_tick)
+
+    def _warm_fonts(self):
+        """이모지 글꼴 대체 검색을 화면이 뜬 뒤 미리 해 둔다 (자녀 화면 전환이 끊기지 않게)."""
+        try:
+            tk.Label(self.root, text="🎉👋🎟️⏰", font=("Malgun Gothic", 11)).destroy()
+        except tk.TclError:
+            pass
 
     def _check_abnormal_exit(self):
         """이전 실행이 정상 종료되지 않았으면(강제 종료 의심) 부모에게 신고.
@@ -230,7 +240,9 @@ class GuardApp:
         self._clear()
         self.screen = "login"
         card = self._card()
-        self._label(card, "🔒 " + APP_TITLE, 20, bold=True, pady=(0, 4))
+        # 로그인 화면엔 이모지를 쓰지 않는다 — 첫 이모지 표시 때 Windows 글꼴 대체 검색에
+        # 1초 넘게 걸려 부팅 후 잠금 화면이 늦게 뜬다 (_warm_fonts 에서 미리 처리)
+        self._label(card, APP_TITLE, 20, bold=True, pady=(0, 4))
         self._label(card, "PC를 사용하려면 로그인하세요", 11, SUB, pady=(0, 18))
 
         if not self.cfg.get("server_url"):
@@ -249,7 +261,7 @@ class GuardApp:
 
         self._button(card, "로그인", self._do_login, pady=(8, 0), fill="x")
         self.login_msg = self._label(card, notice or "", 10, WARN, pady=(10, 0))
-        self._button(card, "⏻ PC 끄기", self._shutdown_pc, color="#475569",
+        self._button(card, "PC 끄기", self._shutdown_pc, color="#475569",
                      pady=(14, 0))
         self._label(card, APP_VERSION, 8, "#475569", pady=(6, 0))
         watchdog.set_task_manager(False)  # 자녀 제어 화면 — 작업 관리자 차단
@@ -890,12 +902,14 @@ def main():
     watchdog.set_active(not args.windowed)
     # 이전 세션의 정상종료 플래그 정리 + 워치독 기동 (강제종료 방어)
     watchdog.clear_stop()
-    watchdog.ensure_watchdog()
+    # (워치독은 GuardApp 이 화면을 띄운 뒤 WATCHDOG_START_MS 후에 시작한다)
 
     if updater.frozen() and not args.windowed:
         try:
             autostart.sync_to_current()          # 자동 시작을 지금 exe 로 (업데이트 후 경로 변경)
+            autostart.disable_startup_delay()    # Windows 시작 프로그램 지연 끄기 (로그인 화면을 빨리)
             updater.cleanup_old(sys.executable)  # 예전 버전 파일 정리
+            updater.cleanup_runtime_dirs()       # 강제 종료로 남은 압축 해제 폴더 정리
         except Exception:
             pass
 

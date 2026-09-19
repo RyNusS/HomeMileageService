@@ -26,11 +26,11 @@ if ($LASTEXITCODE -ne 0) { throw "단위 테스트 실패" }
 if (Get-Process -Name $name -ErrorAction SilentlyContinue) { throw "$name.exe 가 실행 중이에요. 종료 후 다시 빌드하세요." }
 if (Test-Path "$Root\dist\$name.exe") { Remove-Item "$Root\dist\$name.exe" -Force }
 
-& "$Root\.venv\Scripts\pyinstaller.exe" --onefile --noconsole --clean `
-    --name $name `
-    --distpath "$Root\dist" --workpath "$Root\build\work" --specpath "$Root\build\spec" `
-    --paths "$Root" `
-    "$Root\src\session\guard.py"
+# 빌드 설정은 hms-guard.spec (쓰지 않는 Tcl/Tk 데이터 제외, 압축 해제 위치 = 백신 제외 폴더)
+$env:HMS_GUARD_NAME = $name
+& "$Root\.venv\Scripts\pyinstaller.exe" --noconfirm --clean `
+    --distpath "$Root\dist" --workpath "$Root\build\work" `
+    "$Root\hms-guard.spec"
 if ($LASTEXITCODE -ne 0) { throw "빌드 실패" }
 
 $exe = "$Root\dist\$name.exe"

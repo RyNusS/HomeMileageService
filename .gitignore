@@ -58,3 +58,4 @@ telegram_notify.py
 __pycache__/
 *.pyc
 *.spec
+!pc-guard/hms-guard.spec
