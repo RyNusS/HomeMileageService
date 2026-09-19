@@ -1,0 +1,3 @@
+# PC 가드 실행·빌드 의존성 (Windows 전용)
+pywin32>=306        # 자녀 로그인 토큰 암호화(DPAPI)
+pyinstaller>=6.0    # exe 빌드

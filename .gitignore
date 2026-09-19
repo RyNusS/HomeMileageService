@@ -52,3 +52,9 @@ Thumbs.db
 _staging/
 telegram_config.json
 telegram_notify.py
+
+# ── PC 가드 (Python) ─────────────────────────
+.venv/
+__pycache__/
+*.pyc
+*.spec

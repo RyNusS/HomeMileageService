@@ -47,6 +47,11 @@ export const ERR_KO = {
   ai_unavailable: 'AI 기능이 아직 준비되지 않았어요',
   bad_ai_limit: '하루 질문 횟수는 0~500 사이로 입력해 주세요',
   nothing_to_update: '변경할 내용이 없어요',
+  bad_pc_max_session: '1회 최대 시간은 5~1440분 사이로 입력해 주세요',
+  bad_pc_offline_grace: '인터넷 끊김 허용은 1~120분 사이로 입력해 주세요',
+  bad_pc_allowed_range: '사용 가능 시간대의 끝이 시작보다 늦어야 해요',
+  bad_free_window: '자유 시간의 요일·시각을 확인해 주세요',
+  bad_free_overlap: '같은 요일에 겹치는 자유 시간이 있어요',
   forbidden: '권한이 없어요',
   not_found: '이미 삭제되었거나 찾을 수 없어요',
 };

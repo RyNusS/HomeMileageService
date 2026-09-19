@@ -51,6 +51,7 @@ export async function adminRoutes(app) {
       await c.query('DELETE FROM spend_catalog WHERE family_id = $1', [fid]);
       await c.query('DELETE FROM earn_catalog WHERE family_id = $1', [fid]);
       await c.query('DELETE FROM telegram_link WHERE family_id = $1', [fid]);
+      await c.query('DELETE FROM pc_settings WHERE family_id = $1', [fid]);
       await c.query('DELETE FROM push_subscription WHERE user_id IN (SELECT id FROM app_user WHERE family_id = $1)', [fid]);
       await c.query('DELETE FROM fcm_token WHERE user_id IN (SELECT id FROM app_user WHERE family_id = $1)', [fid]);
       await c.query('DELETE FROM app_user WHERE family_id = $1', [fid]);
@@ -151,6 +152,7 @@ export async function adminRoutes(app) {
       await c.query('DELETE FROM push_subscription WHERE user_id = $1', [uid]);
       await c.query('DELETE FROM fcm_token WHERE user_id = $1', [uid]);
       await c.query('DELETE FROM telegram_link WHERE parent_user_id = $1', [uid]);
+      await c.query('UPDATE pc_settings SET updated_by = NULL WHERE updated_by = $1', [uid]);
       await c.query('DELETE FROM app_user WHERE id = $1', [uid]);
       return true;
     });

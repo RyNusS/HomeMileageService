@@ -6,6 +6,7 @@ import { getSubscriptionState, enablePush } from '../pushClient.js';
 import usePullToRefresh from '../pullToRefresh.js';
 import { NoticeSection } from './Notices.jsx';
 import ChatTab, { initialTab, useChatUnread } from './Chat.jsx';
+import { PcSettingsCard } from './PcSettings.jsx';
 
 const fmtDT = (s) => new Date(s).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 // 1년치 내역은 연도까지 표시
@@ -387,6 +388,8 @@ function FamilyTab() {
         ))}
       </div>
       <button className="primary" onClick={() => { setMode({ type: 'new' }); setF({}); }}>+ 자녀 계정 만들기</button>
+      <div style={{ height: 12 }} />
+      <PcSettingsCard />
       {mode && (
         <div className="modal-bg" onClick={close}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>

@@ -103,7 +103,7 @@ export function buildApp() {
   app.register(pushRoutes, { prefix: '/api' });
   app.register(telegramRoutes, { prefix: '/api' });
   app.register(opsRoutes, { prefix: '/api' });
-  app.register(guardRoutes, { prefix: '/api' });
+  app.register(guardRoutes, { prefix: '/api', uploadDir: UPLOAD_DIR });
   app.register(chatRoutes, { prefix: '/api', uploadDir: UPLOAD_DIR });
 
   return app;

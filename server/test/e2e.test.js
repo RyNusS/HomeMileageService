@@ -584,6 +584,59 @@ async function main() {
     console.log('miss penalty ok');
   }
 
+  // ---- v1.28.0 PC 설정 (가족 단위) + 가드 자동 업데이트 ----
+  {
+    const s0 = await api('GET', '/api/pc-settings', null, tokens.child, 200);
+    assert.equal(s0.configured, false);
+    assert.equal(s0.allowed_start, '08:00'); assert.deepEqual(s0.free_windows, []);
+    const body = {
+      max_session_min: 90, allowed_start: '8:00', allowed_end: '21:30', offline_grace_min: 15,
+      free_windows: [{ day: 0, start: '07:00', end: '09:00' }, { day: 6, start: '7:00', end: '09:00' }],
+    };
+    await api('PUT', '/api/pc-settings', body, tokens.child, 403);
+    const s1 = await api('PUT', '/api/pc-settings', body, tokens.parent, 200);
+    assert.equal(s1.configured, true); assert.equal(s1.max_session_min, 90);
+    assert.equal(s1.allowed_start, '08:00');
+    assert.deepEqual(s1.free_windows, [{ day: 0, start: '07:00', end: '09:00' }, { day: 6, start: '07:00', end: '09:00' }]);
+    const s2 = await api('GET', '/api/pc-settings', null, tokens.child, 200);
+    assert.deepEqual(s2.free_windows, s1.free_windows);
+    // 검증: 겹침·역전·범위
+    const bad = async (patch, code) => {
+      const r = await api('PUT', '/api/pc-settings', { ...body, ...patch }, tokens.parent, 400);
+      assert.equal(r.error, code);
+    };
+    await bad({ free_windows: [{ day: 6, start: '07:00', end: '09:00' }, { day: 6, start: '08:30', end: '10:00' }] }, 'bad_free_overlap');
+    await bad({ free_windows: [{ day: 6, start: '09:00', end: '07:00' }] }, 'bad_free_window');
+    await bad({ free_windows: [{ day: 7, start: '07:00', end: '09:00' }] }, 'bad_free_window');
+    await bad({ allowed_start: '22:00' }, 'bad_pc_allowed_range');
+    await bad({ max_session_min: 2 }, 'bad_pc_max_session');
+    await bad({ offline_grace_min: 0 }, 'bad_pc_offline_grace');
+    // 자정까지(24:00) 허용
+    const s3 = await api('PUT', '/api/pc-settings', { ...body, free_windows: [{ day: 5, start: '22:00', end: '24:00' }] }, tokens.parent, 200);
+    assert.equal(s3.free_windows[0].end, '24:00');
+    // 자유 시간 시작 이벤트
+    await api('POST', '/api/guard/event', { type: 'free_start', until: '09:00' }, tokens.child, 200);
+
+    // 가드 업데이트: 파일 없으면 version null
+    const u0 = await api('GET', '/api/guard/update', null, null, 200);
+    assert.equal(u0.version, null);
+    const crypto = await import('node:crypto');
+    const gdir = path.join(process.env.UPLOAD_DIR, 'guard');
+    fs.mkdirSync(gdir, { recursive: true });
+    const bin = Buffer.from('fake-exe-content');
+    fs.writeFileSync(path.join(gdir, 'hms-guard.v1.0.0.exe'), bin);
+    const sha = crypto.createHash('sha256').update(bin).digest('hex');
+    fs.writeFileSync(path.join(gdir, 'latest.json'), JSON.stringify({ version: 'v1.0.0', file: 'hms-guard.v1.0.0.exe', sha256: sha }));
+    const u1 = await api('GET', '/api/guard/update', null, null, 200);
+    assert.equal(u1.version, 'v1.0.0'); assert.equal(u1.sha256, sha); assert.equal(u1.size, bin.length);
+    const dl = await fetch(base + u1.url);
+    assert.equal(dl.status, 200);
+    assert.equal(Buffer.from(await dl.arrayBuffer()).toString(), 'fake-exe-content');
+    assert.equal((await fetch(base + '/api/guard/download/other.exe')).status, 404);
+    assert.equal((await fetch(base + '/api/guard/download/..%2Flatest.json')).status, 404);
+    console.log('pc settings + guard update ok');
+  }
+
   console.log('ALL E2E TESTS PASSED');
 }
 
